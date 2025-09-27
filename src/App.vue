@@ -641,6 +641,7 @@ function returnToLanding() {
   border-radius: 0.75rem;
   padding: 0.6rem 1rem;
   font-weight: 600;
+  font-size: 1.05rem;
   cursor: pointer;
   box-shadow: 0 10px 20px rgba(63, 130, 248, 0.15);
 }
@@ -749,6 +750,7 @@ function returnToLanding() {
   background: #f4f7ff;
   color: #30406b;
   font-weight: 600;
+  font-size: 1.05rem;
   padding: 0.85rem 1.1rem;
   cursor: pointer;
   transition: background 0.2s ease, box-shadow 0.2s ease;
