@@ -700,6 +700,7 @@ function returnToLanding() {
   background: #f4f7ff;
   padding: 0.7rem 0.75rem;
   font-weight: 600;
+  font-size: 1.05rem;
   color: #30406b;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease, border 0.2s ease;
