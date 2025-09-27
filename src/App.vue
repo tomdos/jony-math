@@ -317,10 +317,10 @@ function formatQuestionLabel(count: number) {
   return 'příkladů'
 }
 
-function resetWordAnswer(problem: WordProblem | null) {
+function resetWordAnswer(_problem: WordProblem | null) {
   wordAnswer.value = {
     a: null,
-    op: problem ? problem.op : null,
+    op: null,
     b: null,
     result: null,
   }
