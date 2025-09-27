@@ -20,9 +20,9 @@ const inputRef = ref<HTMLInputElement | null>(null)
 
 const buttonLabel = computed(() => {
   if (props.isReview) {
-    return props.isLast ? 'Finish review' : 'Check answer'
+    return props.isLast ? 'Dokončit opakování' : 'Zkontrolovat odpověď'
   }
-  return props.isLast ? 'Finish' : 'Next'
+  return props.isLast ? 'Dokončit' : 'Další'
 })
 
 const inputClasses = computed(() => ({
@@ -76,8 +76,8 @@ defineExpose({
 <template>
   <div class="problem-card" role="form" aria-label="Math question">
     <p class="prompt">
-      {{ isReview ? 'Try again:' : 'Solve:' }}
-      <span v-if="isReview" class="retry-tag">Review round</span>
+      {{ isReview ? 'Zkuste znovu:' : 'Vyřešte:' }}
+      <span v-if="isReview" class="retry-tag">Kolo opakování</span>
     </p>
     <div class="equation">
       <span class="operand">{{ question.a }}</span>
@@ -100,7 +100,7 @@ defineExpose({
         aria-label="Your answer"
       />
     </div>
-    <p v-if="hasError" class="error-text">That’s not it yet. Check the numbers and try again.</p>
+    <p v-if="hasError" class="error-text">Stále to nesedí. Zkontrolujte čísla a zkuste to znovu.</p>
     <button
       v-if="canSubmit"
       type="button"

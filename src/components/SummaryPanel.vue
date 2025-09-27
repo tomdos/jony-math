@@ -1,75 +1,62 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { Question } from '../stores/session'
 
-const props = defineProps<{
+interface ResultEntry {
+  id: string
+  prompt?: string
+  expression: string
+  hadMistake: boolean
+  firstWrong?: string | null
+}
+
+defineProps<{
   total: number
   correct: number
-  attempt: number
-  wrongCount: number
-  modeLabel: string
-  maxNumber: number
-  wrongDetails: Array<{ question: Question; answer: number | null }>
-  justReviewed: boolean
+  mistakes: number
+  results: ResultEntry[]
 }>()
 
-const headline = computed(() => {
-  if (!props.wrongCount) {
-    return 'Great job! Every answer was correct.'
+function formatExampleLabel(count: number) {
+  if (count === 1) {
+    return 'příklad'
   }
-  if (props.justReviewed) {
-    return `Keep going! ${props.wrongCount} question${props.wrongCount === 1 ? '' : 's'} still need attention.`
+  if (count >= 2 && count <= 4) {
+    return 'příklady'
   }
-  return `You solved ${props.correct} out of ${props.total}. Let’s retry the rest.`
-})
-
-const subline = computed(() => {
-  if (!props.wrongCount) {
-    return `All ${props.total} answers are spot on. You can start a new exercise any time.`
-  }
-  const retryLabel = props.justReviewed ? 'Give them another shot.' : 'Tap "Retry Mistakes" to see them again.'
-  return `${props.wrongCount} question${props.wrongCount === 1 ? '' : 's'} still need a correct answer. ${retryLabel}`
-})
+  return 'příkladů'
+}
 </script>
 
 <template>
   <div class="summary-panel">
-    <p class="headline">{{ headline }}</p>
-    <p class="subline">{{ subline }}</p>
-
-    <div class="stats">
-      <div class="stat">
-        <span class="label">Exercise</span>
-        <span class="value">{{ modeLabel }} · {{ total }} questions · up to {{ maxNumber }}</span>
-      </div>
-      <div class="stat">
-        <span class="label">Attempts</span>
-        <span class="value">{{ attempt }}</span>
-      </div>
-      <div class="stat">
-        <span class="label">Correct</span>
+    <div class="totals">
+      <div class="total-block success">
+        <span class="label">Správně</span>
         <span class="value">{{ correct }}</span>
       </div>
-      <div class="stat" v-if="wrongCount">
-        <span class="label">Still to solve</span>
-        <span class="value highlight">{{ wrongCount }}</span>
+      <div class="total-block error">
+        <span class="label">Chyby</span>
+        <span class="value">{{ mistakes }}</span>
       </div>
     </div>
 
-    <div v-if="wrongDetails.length" class="trouble-list">
-      <p class="list-title">You’ll see these again:</p>
-      <ul>
-        <li v-for="item in wrongDetails" :key="item.question.id">
-          <span class="expression">
-            {{ item.question.a }}
-            {{ item.question.op }}
-            {{ item.question.b }}
-            = {{ item.question.correct }}
+    <ul class="results-list">
+      <li v-for="item in results" :key="item.id" :class="['result-row', item.hadMistake ? 'wrong' : 'correct']">
+        <div class="row-main">
+          <div class="row-text">
+            <span v-if="item.prompt" class="prompt-text">{{ item.prompt }}</span>
+            <span class="expression">{{ item.expression }}</span>
+          </div>
+          <span class="status">
+            {{ item.hadMistake ? 'Chyba v průběhu' : 'Správně napoprvé' }}
           </span>
-          <span v-if="item.answer !== null" class="answer-note">Your answer: {{ item.answer }}</span>
-        </li>
-      </ul>
-    </div>
+        </div>
+        <span v-if="item.hadMistake && item.firstWrong" class="answer">
+          První odpověď: {{ item.firstWrong }}
+        </span>
+      </li>
+    </ul>
+
+    <p class="total-note">Celkem: {{ total }} {{ formatExampleLabel(total) }}</p>
   </div>
 </template>
 
@@ -77,34 +64,22 @@ const subline = computed(() => {
 .summary-panel {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
   padding: 1.5rem;
   background: #ffffff;
   border-radius: 1.25rem;
   box-shadow: 0 20px 45px rgba(32, 56, 120, 0.12);
 }
 
-.headline {
-  font-size: 1.35rem;
-  font-weight: 700;
-  color: #1f2540;
-  margin: 0;
-}
-
-.subline {
-  margin: 0;
-  color: #4a5570;
-  font-size: 0.95rem;
-}
-
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+.totals {
+  display: flex;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
-.stat {
-  background: #f2f6ff;
+.total-block {
+  flex: 1 1 12rem;
+  min-width: 12rem;
   border-radius: 1rem;
   padding: 1rem;
   display: flex;
@@ -112,50 +87,73 @@ const subline = computed(() => {
   gap: 0.4rem;
 }
 
-.label {
-  font-size: 0.8rem;
+.total-block .label {
+  font-size: 0.85rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #5f6b85;
-}
-
-.value {
-  font-size: 1.05rem;
   font-weight: 600;
-  color: #1f2540;
 }
 
-.value.highlight {
-  color: #d9480f;
+.total-block .value {
+  font-size: 2.4rem;
+  font-weight: 700;
 }
 
-.trouble-list {
-  border-top: 1px solid #e0e7ff;
-  padding-top: 1rem;
+.total-block.success {
+  background: #ecfdf3;
+  color: #1a7f3c;
 }
 
-.list-title {
-  margin: 0 0 0.75rem;
-  font-weight: 600;
-  color: #23304d;
+.total-block.error {
+  background: #fff1f0;
+  color: #b42318;
 }
 
-ul {
+.results-list {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
 
-li {
+.result-row {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.75rem 1rem;
-  border-radius: 0.85rem;
-  background: #f9fbff;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.95rem;
+  border: 1px solid transparent;
+}
+
+.result-row.correct {
+  background: #f0f9ff;
+  border-color: #9ed2ff;
+}
+
+.result-row.wrong {
+  background: #fff4f2;
+  border-color: #f3b7ac;
+}
+
+.row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.prompt-text {
+  font-size: 0.9rem;
+  color: #4a5570;
 }
 
 .expression {
@@ -163,8 +161,39 @@ li {
   color: #1f2540;
 }
 
-.answer-note {
+.status {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.result-row.correct .status {
+  color: #1a7f3c;
+}
+
+.result-row.wrong .status {
+  color: #b42318;
+}
+
+.answer {
   font-size: 0.85rem;
-  color: #5f6b85;
+  color: #4a5570;
+}
+
+.total-note {
+  margin: 0.5rem 0 0;
+  text-align: center;
+  font-weight: 500;
+  color: #4a5570;
+}
+
+@media (max-width: 540px) {
+  .total-block {
+    min-width: auto;
+    flex: 1 1 100%;
+  }
+
+  .total-block .value {
+    font-size: 2rem;
+  }
 }
 </style>

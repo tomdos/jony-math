@@ -30,6 +30,8 @@ interface SessionState {
   lastRunWasReview: boolean
   attempts: number
   reviewError: boolean
+  mistakeIndices: number[]
+  mistakeAnswers: Record<number, number>
 }
 
 const UNIQUE_ATTEMPT_MULTIPLIER = 12
@@ -41,9 +43,9 @@ export const defaultSettings: SessionSettings = {
 }
 
 const operationLabels: Record<OperationMode, string> = {
-  add: 'Addition',
-  sub: 'Subtraction',
-  mix: 'Mixed + / -',
+  add: 'Sčítání',
+  sub: 'Odčítání',
+  mix: 'Smíšené + / -',
 }
 
 function randomInt(min: number, max: number) {
@@ -160,6 +162,8 @@ export const useSessionStore = defineStore('session', {
     lastRunWasReview: false,
     attempts: 0,
     reviewError: false,
+    mistakeIndices: [],
+    mistakeAnswers: {},
   }),
   getters: {
     currentQuestion(state): Question | null {
@@ -182,9 +186,10 @@ export const useSessionStore = defineStore('session', {
       return state.questions.length
     },
     correctCount(state): number {
-      return state.questions.reduce((sum, question, index) => {
-        return sum + (state.answers[index] === question.correct ? 1 : 0)
-      }, 0)
+      const total = state.questions.length
+      const uniqueMistakes = new Set(state.mistakeIndices).size
+      const correct = total - uniqueMistakes
+      return correct >= 0 ? correct : 0
     },
     wrongQuestions(state): Question[] {
       return state.wrongIndices
@@ -208,6 +213,8 @@ export const useSessionStore = defineStore('session', {
       this.lastRunWasReview = false
       this.attempts = 1
       this.reviewError = false
+      this.mistakeIndices = []
+      this.mistakeAnswers = {}
     },
     submitAnswer(answer: number) {
       if (this.phase !== 'quiz' && this.phase !== 'review') {
@@ -217,8 +224,15 @@ export const useSessionStore = defineStore('session', {
       if (currentIndex === undefined) {
         return
       }
+      const question = this.questions[currentIndex]
+      if (!question) {
+        return
+      }
       if (this.phase === 'quiz') {
         this.answers[currentIndex] = answer
+        if (answer !== question.correct) {
+          this.recordMistake(currentIndex, answer)
+        }
         this.reviewError = false
         if (this.pointer < this.order.length - 1) {
           this.pointer += 1
@@ -227,12 +241,6 @@ export const useSessionStore = defineStore('session', {
         }
         return
       }
-
-      const question = this.questions[currentIndex]
-      if (!question) {
-        return
-      }
-
       this.reviewResponses[currentIndex] = answer
       if (answer === question.correct) {
         this.answers[currentIndex] = answer
@@ -244,6 +252,7 @@ export const useSessionStore = defineStore('session', {
         }
       } else {
         this.reviewError = true
+        this.recordMistake(currentIndex, answer)
       }
     },
     finishRun() {
@@ -253,6 +262,9 @@ export const useSessionStore = defineStore('session', {
       this.reviewResponses = {}
       evaluateWrongIndices(this)
       this.reviewError = false
+      this.wrongIndices.forEach((index) => {
+        this.recordMistake(index, this.answers[index] ?? null)
+      })
 
       if (!wasReview && this.wrongIndices.length) {
         this.beginRetry()
@@ -285,9 +297,19 @@ export const useSessionStore = defineStore('session', {
       this.lastRunWasReview = false
       this.attempts = 0
       this.reviewError = false
+      this.mistakeIndices = []
+      this.mistakeAnswers = {}
     },
     clearReviewError() {
       this.reviewError = false
+    },
+    recordMistake(index: number, answer: number | null) {
+      if (!this.mistakeIndices.includes(index)) {
+        this.mistakeIndices.push(index)
+        if (typeof answer === 'number') {
+          this.mistakeAnswers[index] = answer
+        }
+      }
     },
   },
 })
