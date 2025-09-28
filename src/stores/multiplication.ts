@@ -1,27 +1,27 @@
 import { defineStore } from 'pinia'
 
-export type OperationMode = 'add' | 'sub' | 'mix'
+export type MultiplicationMode = 'mul' | 'div' | 'mix'
 
-export interface SessionSettings {
-  mode: OperationMode
+export interface MultiplicationSettings {
+  mode: MultiplicationMode
   count: number
   max: number
 }
 
-export interface Question {
+export interface MultiplicationQuestion {
   id: string
   a: number
   b: number
-  op: '+' | '-' | '×' | '÷'
+  op: '×' | '÷'
   correct: number
 }
 
-type SessionPhase = 'setup' | 'quiz' | 'summary' | 'review'
+type MultiplicationPhase = 'setup' | 'quiz' | 'summary' | 'review'
 
-interface SessionState {
-  phase: SessionPhase
-  settings: SessionSettings
-  questions: Question[]
+interface MultiplicationState {
+  phase: MultiplicationPhase
+  settings: MultiplicationSettings
+  questions: MultiplicationQuestion[]
   order: number[]
   pointer: number
   answers: Array<number | null>
@@ -29,130 +29,126 @@ interface SessionState {
   wrongIndices: number[]
   lastRunWasReview: boolean
   attempts: number
-  reviewError: boolean
   mistakeIndices: number[]
   mistakeAnswers: Record<number, number>
+  reviewError: boolean
 }
 
 const UNIQUE_ATTEMPT_MULTIPLIER = 12
+const FACTOR_LIMIT = 10
 
-export const defaultSettings: SessionSettings = {
-  mode: 'mix',
+export const multiplicationDefaultSettings: MultiplicationSettings = {
+  mode: 'mul',
   count: 10,
   max: 20,
 }
 
-const operationLabels: Record<OperationMode, string> = {
-  add: 'Sčítání',
-  sub: 'Odčítání',
-  mix: 'Smíšené + / -',
+const modeLabels: Record<MultiplicationMode, string> = {
+  mul: 'Násobení',
+  div: 'Dělení',
+  mix: 'Smíšené × / ÷',
 }
 
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function createAddition(max: number) {
-  const a = randomInt(0, max)
-  const b = randomInt(0, max - a)
-  return { a, b, op: '+' as const, correct: a + b }
-}
-
-function createSubtraction(max: number) {
-  const a = randomInt(0, max)
-  const b = randomInt(0, a)
-  return { a, b, op: '-' as const, correct: a - b }
-}
-
-function buildQuestion(mode: OperationMode, max: number) {
-  if (mode === 'add') {
-    return createAddition(max)
+function createMultiplicationPair(maxResult: number) {
+  const maxAttempts = 100
+  for (let i = 0; i < maxAttempts; i += 1) {
+    const a = randomInt(1, FACTOR_LIMIT)
+    const b = randomInt(1, FACTOR_LIMIT)
+    const product = a * b
+    if (product <= maxResult) {
+      return { a, b, product }
+    }
   }
-  if (mode === 'sub') {
-    return createSubtraction(max)
+  // Fallback: find smallest pair deterministically
+  for (let a = 1; a <= FACTOR_LIMIT; a += 1) {
+    for (let b = 1; b <= FACTOR_LIMIT; b += 1) {
+      const product = a * b
+      if (product <= maxResult) {
+        return { a, b, product }
+      }
+    }
   }
-  const mixed = Math.random() < 0.5 ? 'add' : 'sub'
-  return mixed === 'add' ? createAddition(max) : createSubtraction(max)
+  return { a: 1, b: 1, product: 1 }
 }
 
-function shuffle<T>(items: T[]) {
-  for (let i = items.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const temp = items[i]!
-    items[i] = items[j]!
-    items[j] = temp
+function createMultiplicationQuestion(max: number): MultiplicationQuestion {
+  const pair = createMultiplicationPair(max)
+  return {
+    id: `mul-${pair.a}x${pair.b}-${Math.random().toString(36).slice(2, 8)}`,
+    a: pair.a,
+    b: pair.b,
+    op: '×',
+    correct: pair.product,
   }
-  return items
 }
 
-function generateQuestions(settings: SessionSettings): Question[] {
+function createDivisionQuestion(max: number): MultiplicationQuestion {
+  const pair = createMultiplicationPair(max)
+  const dividend = pair.product
+  const useFirst = Math.random() < 0.5
+  const divisor = useFirst ? pair.a : pair.b
+  const quotient = useFirst ? pair.b : pair.a
+  return {
+    id: `div-${dividend}:${divisor}-${Math.random().toString(36).slice(2, 8)}`,
+    a: dividend,
+    b: divisor,
+    op: '÷',
+    correct: quotient,
+  }
+}
+
+function buildQuestion(mode: MultiplicationMode, max: number): MultiplicationQuestion {
+  if (mode === 'mul') {
+    return createMultiplicationQuestion(max)
+  }
+  if (mode === 'div') {
+    return createDivisionQuestion(max)
+  }
+  return Math.random() < 0.5
+    ? createMultiplicationQuestion(max)
+    : createDivisionQuestion(max)
+}
+
+function generateQuestions(settings: MultiplicationSettings): MultiplicationQuestion[] {
   const { mode, count, max } = settings
-  const questions: Question[] = []
+  const questions: MultiplicationQuestion[] = []
   const uniqueKeys = new Set<string>()
   const maxAttempts = count * UNIQUE_ATTEMPT_MULTIPLIER
   let attempts = 0
-  let zeroOperandCount = 0
-  let zeroResultCount = 0
 
   while (questions.length < count && attempts < maxAttempts) {
-    const base = buildQuestion(mode, max)
-    const key = `${base.a}|${base.op}|${base.b}`
+    const question = buildQuestion(mode, max)
+    const key = `${question.a}|${question.op}|${question.b}`
     attempts += 1
     if (uniqueKeys.has(key)) {
       continue
     }
-    const hasZeroOperand = base.a === 0 || base.b === 0
-    const hasZeroResult = base.correct === 0
-    if (hasZeroOperand && zeroOperandCount >= 1) {
-      continue
-    }
-    if (hasZeroResult && zeroResultCount >= 1) {
-      continue
-    }
     uniqueKeys.add(key)
-    questions.push({ ...base, id: `${key}-${Math.random().toString(36).slice(2, 8)}` })
-    if (hasZeroOperand) {
-      zeroOperandCount += 1
-    }
-    if (hasZeroResult) {
-      zeroResultCount += 1
-    }
+    questions.push(question)
   }
 
   while (questions.length < count) {
-    const base = buildQuestion(mode, max)
-    const key = `${base.a}|${base.op}|${base.b}`
-    const hasZeroOperand = base.a === 0 || base.b === 0
-    const hasZeroResult = base.correct === 0
-    if (hasZeroOperand && zeroOperandCount >= 1) {
-      continue
-    }
-    if (hasZeroResult && zeroResultCount >= 1) {
-      continue
-    }
-    questions.push({ ...base, id: `${key}-${Math.random().toString(36).slice(2, 8)}` })
-    if (hasZeroOperand) {
-      zeroOperandCount += 1
-    }
-    if (hasZeroResult) {
-      zeroResultCount += 1
-    }
+    questions.push(buildQuestion(mode, max))
   }
 
-  return shuffle(questions)
+  return questions
 }
 
-function evaluateWrongIndices(state: SessionState) {
+function evaluateWrongIndices(state: MultiplicationState) {
   state.wrongIndices = state.questions
     .map((question, index) => ({ index, correct: question.correct, answer: state.answers[index] }))
     .filter((item) => item.answer !== item.correct)
     .map((item) => item.index)
 }
 
-export const useSessionStore = defineStore('session', {
-  state: (): SessionState => ({
+export const useMultiplicationStore = defineStore('multiplication', {
+  state: (): MultiplicationState => ({
     phase: 'setup',
-    settings: { ...defaultSettings },
+    settings: { ...multiplicationDefaultSettings },
     questions: [],
     order: [],
     pointer: 0,
@@ -161,12 +157,12 @@ export const useSessionStore = defineStore('session', {
     wrongIndices: [],
     lastRunWasReview: false,
     attempts: 0,
-    reviewError: false,
     mistakeIndices: [],
     mistakeAnswers: {},
+    reviewError: false,
   }),
   getters: {
-    currentQuestion(state): Question | null {
+    currentQuestion(state): MultiplicationQuestion | null {
       if (!state.order.length) {
         return null
       }
@@ -187,21 +183,16 @@ export const useSessionStore = defineStore('session', {
     },
     correctCount(state): number {
       const total = state.questions.length
-      const uniqueMistakes = new Set(state.mistakeIndices).size
-      const correct = total - uniqueMistakes
+      const mistakes = new Set(state.mistakeIndices).size
+      const correct = total - mistakes
       return correct >= 0 ? correct : 0
     },
-    wrongQuestions(state): Question[] {
-      return state.wrongIndices
-        .map((index) => state.questions[index])
-        .filter((question): question is Question => question !== undefined)
-    },
     modeLabel(state): string {
-      return operationLabels[state.settings.mode]
+      return modeLabels[state.settings.mode]
     },
   },
   actions: {
-    startSession(payload: SessionSettings) {
+    startSession(payload: MultiplicationSettings) {
       this.settings = { ...payload }
       this.questions = generateQuestions(this.settings)
       this.answers = Array.from({ length: this.questions.length }, () => null)
@@ -212,9 +203,9 @@ export const useSessionStore = defineStore('session', {
       this.phase = 'quiz'
       this.lastRunWasReview = false
       this.attempts = 1
-      this.reviewError = false
       this.mistakeIndices = []
       this.mistakeAnswers = {}
+      this.reviewError = false
     },
     submitAnswer(answer: number) {
       if (this.phase !== 'quiz' && this.phase !== 'review') {
@@ -251,8 +242,8 @@ export const useSessionStore = defineStore('session', {
           this.finishRun()
         }
       } else {
-        this.reviewError = true
         this.recordMistake(currentIndex, answer)
+        this.reviewError = true
       }
     },
     finishRun() {
@@ -261,9 +252,11 @@ export const useSessionStore = defineStore('session', {
       this.pointer = 0
       this.reviewResponses = {}
       evaluateWrongIndices(this)
-      this.reviewError = false
       this.wrongIndices.forEach((index) => {
-        this.recordMistake(index, this.answers[index] ?? null)
+        const recorded = this.answers[index]
+        if (recorded !== null && recorded !== undefined) {
+          this.recordMistake(index, recorded)
+        }
       })
 
       if (!wasReview && this.wrongIndices.length) {
@@ -296,20 +289,18 @@ export const useSessionStore = defineStore('session', {
       this.wrongIndices = []
       this.lastRunWasReview = false
       this.attempts = 0
-      this.reviewError = false
       this.mistakeIndices = []
       this.mistakeAnswers = {}
+      this.reviewError = false
+    },
+    recordMistake(index: number, answer: number) {
+      if (!this.mistakeIndices.includes(index)) {
+        this.mistakeIndices.push(index)
+        this.mistakeAnswers[index] = answer
+      }
     },
     clearReviewError() {
       this.reviewError = false
-    },
-    recordMistake(index: number, answer: number | null) {
-      if (!this.mistakeIndices.includes(index)) {
-        this.mistakeIndices.push(index)
-        if (typeof answer === 'number') {
-          this.mistakeAnswers[index] = answer
-        }
-      }
     },
   },
 })

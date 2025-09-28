@@ -18,6 +18,11 @@ import {
 } from './stores/word'
 import ClockFace from './components/ClockFace.vue'
 import { useClockStore, type ClockSettings } from './stores/clock'
+import {
+  useMultiplicationStore,
+  multiplicationDefaultSettings,
+  type MultiplicationSettings,
+} from './stores/multiplication'
 
 const session = useSessionStore()
 const {
@@ -57,6 +62,21 @@ const {
   correctCount: clockCorrectCount,
 } = storeToRefs(clockStore)
 
+const multiplicationStore = useMultiplicationStore()
+const {
+  phase: multiplicationPhase,
+  currentQuestion: multiplicationCurrentQuestion,
+  totalInRun: multiplicationTotalInRun,
+  currentStepNumber: multiplicationCurrentStep,
+  pointer: multiplicationPointer,
+  correctCount: multiplicationCorrectCount,
+  settings: multiplicationSettings,
+  questions: multiplicationQuestions,
+  mistakeAnswers: multiplicationMistakeAnswers,
+  mistakeIndices: multiplicationMistakeIndices,
+  reviewError: multiplicationReviewError,
+} = storeToRefs(multiplicationStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
@@ -64,10 +84,12 @@ const wordSetupState = reactive<WordSettings>({ ...wordDefaultSettings })
 Object.assign(wordSetupState, wordStore.settings)
 const clockSetupState = reactive<ClockSettings>({ count: 3 })
 clockSetupState.count = clockStore.settings.count
+const multiplicationSetupState = reactive<MultiplicationSettings>({ ...multiplicationDefaultSettings })
+Object.assign(multiplicationSetupState, multiplicationSettings.value)
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
-const activeModule = ref<'home' | 'math' | 'arithmetic' | 'word' | 'hour'>('home')
+const activeModule = ref<'home' | 'math' | 'arithmetic' | 'multiplication' | 'word' | 'hour'>('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
 const clockAnswer = ref<{ hours: string; minutes: string }>({ hours: '', minutes: '' })
@@ -76,6 +98,12 @@ const clockAwaitingNext = ref(false)
 
 const wordCountOptions = [1, 2, 3, 4, 5]
 const clockCountOptions = [1, 2, 3, 4, 5]
+const multiplicationModeOptions: Array<{ value: MultiplicationSettings['mode']; label: string }> = [
+  { value: 'mul', label: 'Násobení (×)' },
+  { value: 'div', label: 'Dělení (÷)' },
+  { value: 'mix', label: 'Smíšené (× / ÷)' },
+]
+const multiplicationMaxOptions = [10, 20, 30]
 
 const modeOptions: Array<{ value: SessionSettings['mode']; label: string }> = [
   { value: 'add', label: 'Sčítání (+)' },
@@ -175,6 +203,28 @@ const clockIsFinalExercise = computed(() => {
 })
 const clockNextLabel = computed(() => (clockIsFinalExercise.value ? 'Zobrazit výsledky' : 'Další úloha'))
 
+const multiplicationProgressPercent = computed(() => {
+  if (!multiplicationTotalInRun.value) {
+    return 0
+  }
+  return Math.round((multiplicationPointer.value / multiplicationTotalInRun.value) * 100)
+})
+
+const multiplicationMistakeSet = computed(() => new Set(multiplicationMistakeIndices.value))
+const multiplicationSummaryResults = computed(() =>
+  multiplicationQuestions.value.map((question, index) => {
+    const hadMistake = multiplicationMistakeSet.value.has(index)
+    return {
+      id: question.id,
+      expression: `${question.a} ${question.op} ${question.b} = ${question.correct}`,
+      hadMistake,
+      firstWrong: hadMistake
+        ? multiplicationMistakeAnswers.value[index]?.toString() ?? null
+        : null,
+    }
+  }),
+)
+
 watch(
   () => phase.value,
   (newPhase) => {
@@ -221,6 +271,40 @@ watch(
         cardRef.value?.focus()
       })
     }
+  },
+)
+
+watch(
+  () => multiplicationPhase.value,
+  (newPhase) => {
+    if (activeModule.value !== 'multiplication') {
+      return
+    }
+    if (newPhase === 'quiz' || newPhase === 'review') {
+      answerBuffer.value = ''
+      nextTick(() => {
+        cardRef.value?.focus()
+      })
+    } else {
+      answerBuffer.value = ''
+    }
+    multiplicationStore.clearReviewError()
+  },
+)
+
+watch(
+  () => multiplicationPointer.value,
+  () => {
+    if (activeModule.value !== 'multiplication') {
+      return
+    }
+    if (multiplicationPhase.value === 'quiz' || multiplicationPhase.value === 'review') {
+      answerBuffer.value = ''
+      nextTick(() => {
+        cardRef.value?.focus()
+      })
+    }
+    multiplicationStore.clearReviewError()
   },
 )
 
@@ -282,6 +366,14 @@ function startSession() {
   })
 }
 
+function startMultiplicationSession() {
+  multiplicationStore.startSession({
+    mode: multiplicationSetupState.mode,
+    count: multiplicationSetupState.count,
+    max: multiplicationSetupState.max,
+  })
+}
+
 function handleSubmit() {
   if (!canSubmit.value) {
     return
@@ -294,10 +386,28 @@ function handleSubmit() {
   }
 }
 
+function handleMultiplicationSubmit() {
+  if (!canSubmit.value) {
+    return
+  }
+  multiplicationStore.submitAnswer(Number(answerBuffer.value))
+  if (multiplicationPhase.value === 'quiz' || multiplicationPhase.value === 'review') {
+    nextTick(() => {
+      cardRef.value?.focus()
+    })
+  }
+}
+
 function handleRestart() {
   session.resetSession()
   answerBuffer.value = ''
   Object.assign(setupState, settings.value)
+}
+
+function handleMultiplicationRestart() {
+  multiplicationStore.resetSession()
+  answerBuffer.value = ''
+  Object.assign(multiplicationSetupState, multiplicationSettings.value)
 }
 
 const questionLabel = computed(() =>
@@ -308,6 +418,9 @@ function handleAnswerInput(value: string) {
   answerBuffer.value = value
   if (reviewError.value) {
     session.clearReviewError()
+  }
+  if (multiplicationReviewError.value) {
+    multiplicationStore.clearReviewError()
   }
 }
 
@@ -494,6 +607,8 @@ function openMathLanding() {
   wordStore.resetSession()
   syncWordSetupFromStore()
   resetWordAnswer(null)
+  multiplicationStore.resetSession()
+  Object.assign(multiplicationSetupState, multiplicationSettings.value)
   clockStore.reset()
   syncClockSetupFromStore()
   clockFeedback.value = null
@@ -508,12 +623,21 @@ function openArithmetic() {
   activeModule.value = 'arithmetic'
 }
 
+function openMultiplication() {
+  multiplicationStore.resetSession()
+  Object.assign(multiplicationSetupState, multiplicationSettings.value)
+  answerBuffer.value = ''
+  activeModule.value = 'multiplication'
+}
+
 function openWordProblems() {
   session.resetSession()
   answerBuffer.value = ''
   wordStore.resetSession()
   syncWordSetupFromStore()
   resetWordAnswer(null)
+  multiplicationStore.resetSession()
+  Object.assign(multiplicationSetupState, multiplicationSettings.value)
   activeModule.value = 'word'
 }
 
@@ -523,6 +647,8 @@ function openHourLab() {
   wordStore.resetSession()
   resetWordAnswer(null)
   syncWordSetupFromStore()
+  multiplicationStore.resetSession()
+  Object.assign(multiplicationSetupState, multiplicationSettings.value)
   clockStore.reset()
   syncClockSetupFromStore()
   clockAnswer.value = { hours: '', minutes: '' }
@@ -537,6 +663,8 @@ function returnToMathLanding() {
   wordStore.resetSession()
   resetWordAnswer(null)
   syncWordSetupFromStore()
+  multiplicationStore.resetSession()
+  Object.assign(multiplicationSetupState, multiplicationSettings.value)
   clockStore.reset()
   syncClockSetupFromStore()
   clockAnswer.value = { hours: '', minutes: '' }
@@ -551,6 +679,8 @@ function returnToHome() {
   wordStore.resetSession()
   resetWordAnswer(null)
   syncWordSetupFromStore()
+  multiplicationStore.resetSession()
+  Object.assign(multiplicationSetupState, multiplicationSettings.value)
   clockStore.reset()
   syncClockSetupFromStore()
   clockAnswer.value = { hours: '', minutes: '' }
@@ -586,6 +716,9 @@ function returnToHome() {
       <div class="landing-options">
         <button type="button" class="primary-action" @click="openArithmetic">
           Sčítání a odečítání
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openMultiplication">
+          Násobení a dělení
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openWordProblems">
           Slovní úlohy
@@ -703,6 +836,117 @@ function returnToHome() {
       <div class="summary-actions">
         <button type="button" class="primary-action" @click="handleRestart">
           Začít nové cvičení
+        </button>
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'multiplication'" class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Násobení a dělení</h1>
+        <p>Krátké příklady na procvičení tabulek násobení a dělení.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="handleMultiplicationRestart">
+          Začít znovu
+        </button>
+        <button type="button" class="header-button" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </header>
+
+    <section v-if="multiplicationPhase === 'setup'" class="card">
+      <form class="setup-form" @submit.prevent="startMultiplicationSession">
+        <div class="field-group">
+          <span class="field-label">Vyberte dovednost</span>
+          <div class="option-row">
+            <button
+              v-for="option in multiplicationModeOptions"
+              :key="option.value"
+              type="button"
+              :class="['toggle', { active: multiplicationSetupState.mode === option.value }]"
+              @click="multiplicationSetupState.mode = option.value"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="mult-count">Počet příkladů</label>
+          <select
+            id="mult-count"
+            v-model.number="multiplicationSetupState.count"
+            class="select"
+          >
+            <option v-for="count in countOptions" :key="count" :value="count">
+              {{ count }} {{ formatQuestionLabel(count) }}
+            </option>
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="mult-max">Výsledek do</label>
+          <select id="mult-max" v-model.number="multiplicationSetupState.max" class="select">
+            <option v-for="value in multiplicationMaxOptions" :key="value" :value="value">
+              {{ value }}
+            </option>
+          </select>
+        </div>
+
+        <button type="submit" class="primary-action">Start</button>
+      </form>
+    </section>
+
+    <section v-else-if="multiplicationPhase === 'quiz' || multiplicationPhase === 'review'" class="card">
+      <div class="session-meta">
+        <span class="phase-badge" :class="{ review: multiplicationPhase === 'review' }">
+          {{ multiplicationStore.phase === 'review' ? 'Opakování chyb' : 'Nové příklady' }}
+        </span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Příklad {{ multiplicationCurrentStep }} z {{ multiplicationTotalInRun }}
+          </div>
+          <div
+            class="progress-bar"
+            role="progressbar"
+            :aria-valuemin="0"
+            :aria-valuemax="multiplicationTotalInRun"
+            :aria-valuenow="multiplicationPointer"
+          >
+            <span class="progress-fill" :style="{ width: multiplicationProgressPercent + '%' }"></span>
+          </div>
+        </div>
+      </div>
+
+      <ProblemCard
+        v-if="multiplicationCurrentQuestion"
+        ref="cardRef"
+        :question="multiplicationCurrentQuestion"
+        :model-value="answerBuffer"
+        :can-submit="canSubmit"
+        :is-last="multiplicationTotalInRun > 0 && multiplicationCurrentStep === multiplicationTotalInRun"
+        :is-review="multiplicationPhase === 'review'"
+        :has-error="multiplicationPhase === 'review' && multiplicationReviewError"
+        @update:model-value="handleAnswerInput"
+        @submit="handleMultiplicationSubmit"
+      />
+    </section>
+
+    <section v-else class="card">
+      <SummaryPanel
+        :total="multiplicationQuestions.length"
+        :correct="multiplicationCorrectCount"
+        :mistakes="multiplicationMistakeIndices.length"
+        :results="multiplicationSummaryResults"
+      />
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="handleMultiplicationRestart">
+          Spustit nové procvičování
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
