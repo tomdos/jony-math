@@ -16,6 +16,8 @@ import {
   type WordProblem,
   type WordResponse as WordModuleResponse,
 } from './stores/word'
+import ClockFace from './components/ClockFace.vue'
+import { useClockStore, type ClockSettings } from './stores/clock'
 
 const session = useSessionStore()
 const {
@@ -46,19 +48,34 @@ const {
   mistakeRecords: wordMistakeRecords,
 } = storeToRefs(wordStore)
 
+const clockStore = useClockStore()
+const {
+  phase: clockPhase,
+  currentExercise: clockCurrentExercise,
+  totalExercises: clockTotalExercises,
+  pointer: clockPointer,
+  correctCount: clockCorrectCount,
+} = storeToRefs(clockStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
 const wordSetupState = reactive<WordSettings>({ ...wordDefaultSettings })
 Object.assign(wordSetupState, wordStore.settings)
+const clockSetupState = reactive<ClockSettings>({ count: 3 })
+clockSetupState.count = clockStore.settings.count
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
-const activeModule = ref<'landing' | 'arithmetic' | 'word'>('landing')
+const activeModule = ref<'home' | 'math' | 'arithmetic' | 'word' | 'hour'>('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
+const clockAnswer = ref<{ hours: string; minutes: string }>({ hours: '', minutes: '' })
+const clockFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const clockAwaitingNext = ref(false)
 
 const wordCountOptions = [1, 2, 3, 4, 5]
+const clockCountOptions = [1, 2, 3, 4, 5]
 
 const modeOptions: Array<{ value: SessionSettings['mode']; label: string }> = [
   { value: 'add', label: 'Sčítání (+)' },
@@ -141,6 +158,22 @@ const wordSummaryResults = computed(() =>
     }
   }),
 )
+
+const clockIsQuiz = computed(() => clockPhase.value === 'quiz')
+const clockCanSubmit = computed(() => {
+  return (
+    !clockAwaitingNext.value &&
+    clockAnswer.value.hours.trim().length > 0 &&
+    clockAnswer.value.minutes.trim().length > 0
+  )
+})
+const clockIsFinalExercise = computed(() => {
+  if (!clockTotalExercises.value) {
+    return true
+  }
+  return clockPointer.value === clockTotalExercises.value - 1
+})
+const clockNextLabel = computed(() => (clockIsFinalExercise.value ? 'Zobrazit výsledky' : 'Další úloha'))
 
 watch(
   () => phase.value,
@@ -307,6 +340,62 @@ function handleWordRestart() {
   resetWordAnswer(null)
 }
 
+function handleClockStart() {
+  clockStore.start({ count: clockSetupState.count })
+  syncClockSetupFromStore()
+  clockAnswer.value = { hours: '', minutes: '' }
+  clockFeedback.value = null
+  clockAwaitingNext.value = false
+}
+
+function handleClockSubmit() {
+  if (!clockCanSubmit.value) {
+    return
+  }
+  const hoursInput = Number(clockAnswer.value.hours)
+  const minutesInput = Number(clockAnswer.value.minutes)
+  const normalizedHours = normalizeHoursInput(Number.isNaN(hoursInput) ? null : hoursInput)
+  const normalizedMinutes = normalizeMinutesInput(Number.isNaN(minutesInput) ? null : minutesInput)
+  const exercise = clockCurrentExercise.value
+  if (exercise) {
+    if (normalizedHours === exercise.hours && normalizedMinutes === exercise.minutes) {
+      clockFeedback.value = {
+        type: 'success',
+        text: `Správně! Čas je ${formatClockTime(exercise.hours, exercise.minutes)}.`,
+      }
+    } else {
+      clockFeedback.value = {
+        type: 'error',
+        text: `Správný čas byl ${formatClockTime(exercise.hours, exercise.minutes)}.`,
+      }
+    }
+  }
+  clockStore.submitResponse({
+    hours: normalizedHours,
+    minutes: normalizedMinutes,
+  })
+  clockAnswer.value = { hours: '', minutes: '' }
+  clockAwaitingNext.value = true
+}
+
+function handleClockRestart() {
+  clockStore.reset()
+  syncClockSetupFromStore()
+  clockAnswer.value = { hours: '', minutes: '' }
+  clockFeedback.value = null
+  clockAwaitingNext.value = false
+}
+
+function handleClockNext() {
+  if (clockStore.phase !== 'quiz') {
+    return
+  }
+  clockStore.advance()
+  clockAwaitingNext.value = false
+  clockFeedback.value = null
+  clockAnswer.value = { hours: '', minutes: '' }
+}
+
 function formatQuestionLabel(count: number) {
   if (count === 1) {
     return 'příklad'
@@ -324,6 +413,44 @@ function resetWordAnswer(_problem: WordProblem | null) {
     b: null,
     result: null,
   }
+}
+
+function sanitizeNumeric(value: string) {
+  return value.replace(/[^0-9]/g, '')
+}
+
+function normalizeHoursInput(value: number | null): number | null {
+  if (value === null || Number.isNaN(value)) {
+    return null
+  }
+  const wrapped = ((value % 12) + 12) % 12
+  return wrapped === 0 ? 12 : wrapped
+}
+
+function normalizeMinutesInput(value: number | null): number | null {
+  if (value === null || Number.isNaN(value)) {
+    return null
+  }
+  const wrapped = ((value % 60) + 60) % 60
+  return wrapped
+}
+
+function handleClockHoursInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const sanitized = sanitizeNumeric(input.value).slice(0, 2)
+  clockAnswer.value.hours = sanitized
+  input.value = sanitized
+}
+
+function handleClockMinutesInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const sanitized = sanitizeNumeric(input.value).slice(0, 2)
+  clockAnswer.value.minutes = sanitized
+  input.value = sanitized
+}
+
+function formatClockTime(hours: number, minutes: number) {
+  return `${hours}:${minutes.toString().padStart(2, '0')}`
 }
 
 function formatWordEquation(
@@ -356,6 +483,24 @@ function syncWordSetupFromStore() {
   Object.assign(wordSetupState, wordStore.settings)
 }
 
+function syncClockSetupFromStore() {
+  clockSetupState.count = clockStore.settings.count
+}
+
+function openMathLanding() {
+  session.resetSession()
+  answerBuffer.value = ''
+  Object.assign(setupState, settings.value)
+  wordStore.resetSession()
+  syncWordSetupFromStore()
+  resetWordAnswer(null)
+  clockStore.reset()
+  syncClockSetupFromStore()
+  clockFeedback.value = null
+  clockAwaitingNext.value = false
+  activeModule.value = 'math'
+}
+
 function openArithmetic() {
   session.resetSession()
   Object.assign(setupState, settings.value)
@@ -372,18 +517,86 @@ function openWordProblems() {
   activeModule.value = 'word'
 }
 
-function returnToLanding() {
+function openHourLab() {
   session.resetSession()
   answerBuffer.value = ''
   wordStore.resetSession()
   resetWordAnswer(null)
   syncWordSetupFromStore()
-  activeModule.value = 'landing'
+  clockStore.reset()
+  syncClockSetupFromStore()
+  clockAnswer.value = { hours: '', minutes: '' }
+  clockFeedback.value = null
+  clockAwaitingNext.value = false
+  activeModule.value = 'hour'
+}
+
+function returnToMathLanding() {
+  session.resetSession()
+  answerBuffer.value = ''
+  wordStore.resetSession()
+  resetWordAnswer(null)
+  syncWordSetupFromStore()
+  clockStore.reset()
+  syncClockSetupFromStore()
+  clockAnswer.value = { hours: '', minutes: '' }
+  clockFeedback.value = null
+  clockAwaitingNext.value = false
+  activeModule.value = 'math'
+}
+
+function returnToHome() {
+  session.resetSession()
+  answerBuffer.value = ''
+  wordStore.resetSession()
+  resetWordAnswer(null)
+  syncWordSetupFromStore()
+  clockStore.reset()
+  syncClockSetupFromStore()
+  clockAnswer.value = { hours: '', minutes: '' }
+  clockFeedback.value = null
+  clockAwaitingNext.value = false
+  activeModule.value = 'home'
 }
 </script>
 
 <template>
-  <main v-if="activeModule === 'arithmetic'" class="app-shell">
+  <main v-if="activeModule === 'home'" class="app-shell landing-shell">
+    <section class="card landing-card">
+      <div class="landing-header">
+        <h1>Mozkolaboratoř</h1>
+        <p>Vyberte si laboratoř a pusťte se do objevování.</p>
+      </div>
+      <div class="landing-options">
+        <button type="button" class="primary-action" @click="openMathLanding">
+          Matematická laboratoř
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openHourLab">
+          Hodinová laboratoř
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'math'" class="app-shell landing-shell">
+    <section class="card landing-card">
+      <div class="landing-header">
+        <h1>Matematická laboratoř</h1>
+        <p>Začněte s čísly nebo se pusťte do slovních úloh.</p>
+      </div>
+      <div class="landing-options">
+        <button type="button" class="primary-action" @click="openArithmetic">
+          Sčítání a odečítání
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openWordProblems">
+          Slovní úlohy
+        </button>
+        <button type="button" class="secondary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'arithmetic'" class="app-shell">
     <header class="app-header">
       <div class="title-block">
         <h1>Sčítání a odečítání</h1>
@@ -393,7 +606,7 @@ function returnToLanding() {
         <button type="button" class="header-button" @click="handleRestart">
           Začít znovu
         </button>
-        <button type="button" class="header-button" @click="returnToLanding">
+        <button type="button" class="header-button" @click="returnToMathLanding">
           Jiná matematická úloha
         </button>
       </div>
@@ -491,7 +704,7 @@ function returnToLanding() {
         <button type="button" class="primary-action" @click="handleRestart">
           Začít nové cvičení
         </button>
-        <button type="button" class="secondary-action" @click="returnToLanding">
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
         </button>
       </div>
@@ -507,7 +720,7 @@ function returnToLanding() {
         <button type="button" class="header-button" @click="handleWordRestart">
           Začít znovu
         </button>
-        <button type="button" class="header-button" @click="returnToLanding">
+        <button type="button" class="header-button" @click="returnToMathLanding">
           Jiná matematická úloha
         </button>
       </div>
@@ -575,24 +788,108 @@ function returnToLanding() {
         <button type="button" class="primary-action" @click="handleWordRestart">
           Začít nové procvičování
         </button>
-        <button type="button" class="secondary-action" @click="returnToLanding">
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
         </button>
       </div>
     </section>
   </main>
-  <main v-else class="app-shell landing-shell">
-    <section class="card landing-card">
-      <div class="landing-header">
-        <h1>Matematická laboratoř</h1>
-        <p>Začněte s čísly nebo se brzy pusťte do slovních úloh.</p>
+  <main v-else class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Hodinová laboratoř</h1>
+        <p>Procvičte si čtení času z analogových hodin.</p>
       </div>
-      <div class="landing-options">
-        <button type="button" class="primary-action" @click="openArithmetic">
-          Sčítání a odečítání
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="handleClockRestart">
+          Začít znovu
         </button>
-        <button type="button" class="secondary-action landing-secondary" @click="openWordProblems">
-          Slovní úlohy
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+      </div>
+    </header>
+    <section v-if="clockPhase === 'setup'" class="card">
+      <form class="setup-form" @submit.prevent="handleClockStart">
+        <div class="field-row">
+          <label class="field-label" for="clock-count">Počet úloh</label>
+          <select id="clock-count" v-model.number="clockSetupState.count" class="select">
+            <option v-for="count in clockCountOptions" :key="count" :value="count">
+              {{ count }} {{ formatQuestionLabel(count) }}
+            </option>
+          </select>
+        </div>
+        <button type="submit" class="primary-action">Začít procvičovat</button>
+      </form>
+    </section>
+    <section v-else-if="clockIsQuiz" class="card clock-card">
+      <div class="session-meta">
+        <span class="phase-badge">Čtení času</span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Úloha {{ clockPointer + 1 }} z {{ clockTotalExercises }}
+          </div>
+        </div>
+      </div>
+      <div class="clock-display">
+        <ClockFace
+          v-if="clockCurrentExercise"
+          :hours="clockCurrentExercise.hours"
+          :minutes="clockCurrentExercise.minutes"
+        />
+      </div>
+      <div v-if="!clockAwaitingNext" class="clock-interaction">
+        <div class="time-inputs">
+          <label class="time-field">
+            <span>Hodiny</span>
+            <input
+              type="text"
+              inputmode="numeric"
+              maxlength="2"
+              :value="clockAnswer.hours"
+              @input="handleClockHoursInput"
+              aria-label="Odhad hodin"
+            />
+          </label>
+          <label class="time-field">
+            <span>Minuty</span>
+            <input
+              type="text"
+              inputmode="numeric"
+              maxlength="2"
+              :value="clockAnswer.minutes"
+              @input="handleClockMinutesInput"
+              aria-label="Odhad minut"
+            />
+          </label>
+        </div>
+        <button type="button" class="primary-action" :disabled="!clockCanSubmit" @click="handleClockSubmit">
+          Zkontrolovat
+        </button>
+        <p v-if="!clockCanSubmit" class="hint-text">Zadejte hodiny i minuty.</p>
+      </div>
+      <div v-else class="clock-feedback-block">
+        <p v-if="clockFeedback" :class="['feedback-text', clockFeedback.type]">
+          {{ clockFeedback.text }}
+        </p>
+        <button type="button" class="primary-action" @click="handleClockNext">
+          {{ clockNextLabel }}
+        </button>
+      </div>
+    </section>
+    <section v-else class="card">
+      <SummaryPanel
+        :total="clockTotalExercises"
+        :correct="clockCorrectCount"
+        :mistakes="clockTotalExercises - clockCorrectCount"
+        :results="[]"
+      />
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="handleClockRestart">
+          Začít znovu
+        </button>
+        <button type="button" class="secondary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
       </div>
     </section>
@@ -636,19 +933,19 @@ function returnToLanding() {
 
 .header-button {
   border: none;
-  background: #ffffff;
-  color: #3f82f8;
+  background: linear-gradient(135deg, #3f82f8, #5aa9ff);
+  color: #ffffff;
   border-radius: 0.75rem;
   padding: 0.6rem 1rem;
   font-weight: 600;
   font-size: 1.05rem;
   cursor: pointer;
-  box-shadow: 0 10px 20px rgba(63, 130, 248, 0.15);
+  box-shadow: 0 10px 20px rgba(63, 130, 248, 0.25);
 }
 
 .header-button:hover,
 .header-button:focus-visible {
-  box-shadow: 0 14px 28px rgba(63, 130, 248, 0.2);
+  box-shadow: 0 16px 32px rgba(63, 130, 248, 0.35);
   outline: none;
 }
 
@@ -745,11 +1042,17 @@ function returnToLanding() {
   transform: scale(0.98);
 }
 
+.primary-action:disabled {
+  background: linear-gradient(135deg, #9fbdfd, #b9d0ff);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .secondary-action {
   border: none;
   border-radius: 0.85rem;
-  background: #f4f7ff;
-  color: #30406b;
+  background: linear-gradient(135deg, #3f82f8, #5aa9ff);
+  color: #ffffff;
   font-weight: 600;
   font-size: 1.05rem;
   padding: 0.85rem 1.1rem;
@@ -759,8 +1062,7 @@ function returnToLanding() {
 
 .secondary-action:hover,
 .secondary-action:focus-visible {
-  background: #e3ebff;
-  box-shadow: 0 12px 24px rgba(63, 130, 248, 0.15);
+  box-shadow: 0 16px 32px rgba(63, 130, 248, 0.35);
   outline: none;
 }
 
@@ -824,6 +1126,78 @@ function returnToLanding() {
   border-radius: 0.85rem;
   padding: 0.75rem 1rem;
   font-weight: 500;
+}
+
+.clock-card {
+  gap: 1.75rem;
+  align-items: center;
+  text-align: center;
+}
+
+.clock-interaction,
+.clock-feedback-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.clock-display {
+  display: flex;
+  justify-content: center;
+}
+
+.time-inputs {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.time-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #23304d;
+}
+
+.time-field input {
+  border: 2px solid #3f82f8;
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+  width: 4.5rem;
+  color: #1f2540;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 61, 172, 0.1);
+}
+
+.time-field input:focus {
+  outline: 4px solid rgba(63, 130, 248, 0.2);
+  outline-offset: 2px;
+}
+
+.hint-text {
+  margin: 0;
+  color: #5f6b85;
+  font-size: 0.9rem;
+}
+
+.feedback-text {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.feedback-text.success {
+  color: #1a7f3c;
+}
+
+.feedback-text.error {
+  color: #b42318;
 }
 
 .session-meta {
