@@ -1099,11 +1099,11 @@ function returnToHome() {
         <button type="button" class="primary-action" @click="openArithmetic">
           Sčítání a odečítání
         </button>
-        <button type="button" class="secondary-action landing-secondary" @click="openDiceLab">
-          Sečti kostky
-        </button>
         <button type="button" class="secondary-action landing-secondary" @click="openMultiplication">
           Násobení a dělení
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openDiceLab">
+          Sečti kostky
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openWordProblems">
           Slovní úlohy
@@ -1801,8 +1801,8 @@ function returnToHome() {
 }
 
 .landing-secondary {
-  font-size: 1rem;
-  padding: 0.95rem 1.1rem;
+  font-size: 1.05rem;
+  padding: 0.9rem 1.2rem;
 }
 
 .placeholder-card {
