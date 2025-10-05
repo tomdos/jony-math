@@ -18,6 +18,8 @@ import {
 } from './stores/word'
 import ClockFace from './components/ClockFace.vue'
 import { useClockStore, type ClockSettings } from './stores/clock'
+import DiceDisplay from './components/DiceDisplay.vue'
+import { useDiceStore, type DiceSettings } from './stores/dice'
 import {
   useMultiplicationStore,
   multiplicationDefaultSettings,
@@ -86,6 +88,15 @@ const {
   currentStep: readingCurrentStep,
 } = storeToRefs(wordLabStore)
 
+const diceStore = useDiceStore()
+const {
+  phase: dicePhase,
+  currentExercise: currentDiceExercise,
+  totalExercises: diceTotalExercises,
+  currentStep: diceCurrentStep,
+  correctCount: diceCorrectCount,
+} = storeToRefs(diceStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
@@ -97,6 +108,8 @@ const multiplicationSetupState = reactive<MultiplicationSettings>({ ...multiplic
 Object.assign(multiplicationSetupState, multiplicationSettings.value)
 const wordLabSetupState = reactive<WordLabSettings>({ letters: 3, count: 5 })
 Object.assign(wordLabSetupState, wordLabStore.settings)
+const diceSetupState = reactive<DiceSettings>({ diceCount: 2, throwsCount: 5 })
+Object.assign(diceSetupState, diceStore.settings)
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
@@ -109,12 +122,17 @@ const activeModule = ref<
   | 'hour'
   | 'czech'
   | 'wordLab'
+  | 'dice'
 >('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
 const clockAnswer = ref<{ hours: string; minutes: string }>({ hours: '', minutes: '' })
 const clockFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const clockAwaitingNext = ref(false)
+const diceAnswer = ref('')
+const diceFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const diceAwaitingNext = ref(false)
+const diceInputRef = ref<HTMLInputElement | null>(null)
 
 const wordCountOptions = [1, 2, 3, 4, 5]
 const clockCountOptions = [1, 2, 3, 4, 5]
@@ -130,6 +148,15 @@ const wordLabLetterOptions: Array<{ value: WordLabSettings['letters']; label: st
   { value: 5, label: '5 písmen' },
 ]
 const wordLabCountOptions = [5, 10, 15]
+const diceCountOptions: Array<{ value: DiceSettings['diceCount']; label: string }> = [
+  { value: 2, label: '2 kostky' },
+  { value: 3, label: '3 kostky' },
+]
+const diceThrowOptions: Array<{ value: DiceSettings['throwsCount']; label: string }> = [
+  { value: 3, label: '3 hody' },
+  { value: 5, label: '5 hodů' },
+  { value: 6, label: '6 hodů' },
+]
 
 const modeOptions: Array<{ value: SessionSettings['mode']; label: string }> = [
   { value: 'add', label: 'Sčítání (+)' },
@@ -259,6 +286,29 @@ const wordLabProgressPercent = computed(() => {
   return Math.round(((readingCurrentStep.value - 1) / readingTotalWords.value) * 100)
 })
 
+const diceIsQuiz = computed(() => dicePhase.value === 'quiz')
+const diceCanSubmit = computed(
+  () => !diceAwaitingNext.value && diceAnswer.value.trim().length > 0,
+)
+const diceIsLastExercise = computed(() => {
+  if (!diceTotalExercises.value) {
+    return true
+  }
+  return diceCurrentStep.value === diceTotalExercises.value
+})
+const diceNextLabel = computed(() => (diceIsLastExercise.value ? 'Zobrazit výsledky' : 'Další hod'))
+const diceSummaryResults = computed(() =>
+  diceStore.exercises.map((exercise, index) => ({
+    id: exercise.id,
+    expression: `${exercise.values.join(' + ')} = ${exercise.sum}`,
+    hadMistake: diceStore.results[index] === false,
+    firstWrong:
+      diceStore.results[index] === false && diceStore.answers[index] !== null
+        ? diceStore.answers[index]!.toString()
+        : null,
+  })),
+)
+
 watch(
   () => phase.value,
   (newPhase) => {
@@ -339,6 +389,37 @@ watch(
       })
     }
     multiplicationStore.clearReviewError()
+  },
+)
+
+watch(
+  () => dicePhase.value,
+  (newPhase) => {
+    if (activeModule.value !== 'dice') {
+      return
+    }
+    if (newPhase === 'quiz') {
+      diceAnswer.value = ''
+      diceFeedback.value = null
+      diceAwaitingNext.value = false
+      focusDiceInput()
+    } else if (newPhase === 'summary') {
+      diceAnswer.value = ''
+      diceAwaitingNext.value = false
+    }
+  },
+)
+
+watch(
+  () => diceCurrentStep.value,
+  () => {
+    if (activeModule.value !== 'dice') {
+      return
+    }
+    diceAnswer.value = ''
+    diceAwaitingNext.value = false
+    diceFeedback.value = null
+    focusDiceInput()
   },
 )
 
@@ -577,6 +658,71 @@ function returnToCzechLanding() {
   activeModule.value = 'czech'
 }
 
+function openDiceLab() {
+  diceStore.reset()
+  syncDiceSetupFromStore()
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
+  activeModule.value = 'dice'
+}
+
+function handleDiceStart() {
+  diceStore.start({
+    diceCount: diceSetupState.diceCount,
+    throwsCount: diceSetupState.throwsCount,
+  })
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
+  focusDiceInput()
+}
+
+function handleDiceSubmit() {
+  if (!diceCanSubmit.value) {
+    return
+  }
+  const numeric = Number(diceAnswer.value.trim())
+  if (Number.isNaN(numeric)) {
+    return
+  }
+  const exercise = currentDiceExercise.value
+  if (!exercise) {
+    return
+  }
+  diceStore.submit(numeric)
+  const isCorrect = numeric === exercise.sum
+  diceFeedback.value = {
+    type: isCorrect ? 'success' : 'error',
+    text: isCorrect
+      ? `Správně! Součet je ${exercise.sum}.`
+      : `Součet byl ${exercise.sum}.`,
+  }
+  diceAwaitingNext.value = true
+}
+
+function handleDiceNext() {
+  diceStore.next()
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
+  focusDiceInput()
+}
+
+function handleDiceRestart() {
+  diceStore.reset()
+  Object.assign(diceSetupState, diceStore.settings)
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
+}
+
+function focusDiceInput() {
+  nextTick(() => {
+    diceInputRef.value?.focus()
+  })
+}
+
 function formatQuestionLabel(count: number) {
   if (count === 1) {
     return 'příklad'
@@ -634,6 +780,13 @@ function formatClockTime(hours: number, minutes: number) {
   return `${hours}:${minutes.toString().padStart(2, '0')}`
 }
 
+function handleDiceInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const sanitized = sanitizeNumeric(input.value).slice(0, 3)
+  diceAnswer.value = sanitized
+  input.value = sanitized
+}
+
 function formatWordEquation(
   problem: WordProblem,
   response: WordModuleResponse | null,
@@ -672,6 +825,11 @@ function syncWordLabSetupFromStore() {
   Object.assign(wordLabSetupState, wordLabStore.settings)
 }
 
+function syncDiceSetupFromStore() {
+  diceSetupState.diceCount = diceStore.settings.diceCount
+  diceSetupState.throwsCount = diceStore.settings.throwsCount
+}
+
 function openMathLanding() {
   session.resetSession()
   answerBuffer.value = ''
@@ -687,6 +845,11 @@ function openMathLanding() {
   clockAwaitingNext.value = false
   wordLabStore.reset()
   syncWordLabSetupFromStore()
+  diceStore.reset()
+  syncDiceSetupFromStore()
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
   activeModule.value = 'math'
 }
 
@@ -714,6 +877,11 @@ function openWordProblems() {
   Object.assign(multiplicationSetupState, multiplicationSettings.value)
   wordLabStore.reset()
   syncWordLabSetupFromStore()
+  diceStore.reset()
+  syncDiceSetupFromStore()
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
   activeModule.value = 'word'
 }
 
@@ -732,6 +900,11 @@ function openHourLab() {
   clockAwaitingNext.value = false
   wordLabStore.reset()
   syncWordLabSetupFromStore()
+  diceStore.reset()
+  syncDiceSetupFromStore()
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
   activeModule.value = 'hour'
 }
 
@@ -750,6 +923,11 @@ function returnToMathLanding() {
   clockAwaitingNext.value = false
   wordLabStore.reset()
   syncWordLabSetupFromStore()
+  diceStore.reset()
+  syncDiceSetupFromStore()
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
   activeModule.value = 'math'
 }
 
@@ -768,6 +946,11 @@ function returnToHome() {
   clockAwaitingNext.value = false
   wordLabStore.reset()
   syncWordLabSetupFromStore()
+  diceStore.reset()
+  syncDiceSetupFromStore()
+  diceAnswer.value = ''
+  diceFeedback.value = null
+  diceAwaitingNext.value = false
   activeModule.value = 'home'
 }
 </script>
@@ -788,6 +971,104 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action" @click="openCzechLanding">
           Česká laboratoř
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'dice'" class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Sečti kostky</h1>
+        <p>Podívej se na kostky a spočítej jejich součet.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="handleDiceRestart">
+          Začít znovu
+        </button>
+        <button type="button" class="header-button" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </header>
+
+    <section v-if="dicePhase === 'setup'" class="card">
+      <form class="setup-form" @submit.prevent="handleDiceStart">
+        <div class="field-row">
+          <label class="field-label" for="dice-count">Počet kostek</label>
+          <select id="dice-count" v-model.number="diceSetupState.diceCount" class="select">
+            <option v-for="option in diceCountOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="dice-throws">Počet hodů</label>
+          <select id="dice-throws" v-model.number="diceSetupState.throwsCount" class="select">
+            <option v-for="option in diceThrowOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <button type="submit" class="primary-action">Začít házet</button>
+      </form>
+    </section>
+
+    <section v-else-if="diceIsQuiz" class="card dice-card">
+      <div class="session-meta">
+        <span class="phase-badge">Součet</span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Hod {{ diceCurrentStep }} z {{ diceTotalExercises }}
+          </div>
+        </div>
+      </div>
+
+      <DiceDisplay v-if="currentDiceExercise" :values="currentDiceExercise.values" />
+
+      <div v-if="!diceAwaitingNext" class="dice-interaction">
+        <label class="time-field">
+          <span>Součet</span>
+          <input
+            type="text"
+            inputmode="numeric"
+            maxlength="3"
+            :value="diceAnswer"
+            @input="handleDiceInput"
+            @keydown.enter.prevent="diceCanSubmit && handleDiceSubmit()"
+            aria-label="Odhad součtu"
+            ref="diceInputRef"
+          />
+        </label>
+        <button type="button" class="primary-action" :disabled="!diceCanSubmit" @click="handleDiceSubmit">
+          Zkontroluj
+        </button>
+      </div>
+
+      <div v-else class="dice-feedback-block">
+        <p v-if="diceFeedback" :class="['feedback-text', diceFeedback.type]">
+          {{ diceFeedback.text }}
+        </p>
+        <button type="button" class="primary-action" @click="handleDiceNext">
+          {{ diceNextLabel }}
+        </button>
+      </div>
+    </section>
+
+    <section v-else class="card dice-summary">
+      <SummaryPanel
+        :total="diceTotalExercises"
+        :correct="diceCorrectCount"
+        :mistakes="diceTotalExercises - diceCorrectCount"
+        :results="diceSummaryResults"
+      />
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="handleDiceRestart">
+          Začít novou sérii
+        </button>
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
+          Jiná matematická úloha
         </button>
       </div>
     </section>
@@ -817,6 +1098,9 @@ function returnToHome() {
       <div class="landing-options">
         <button type="button" class="primary-action" @click="openArithmetic">
           Sčítání a odečítání
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openDiceLab">
+          Sečti kostky
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openMultiplication">
           Násobení a dělení
@@ -1548,14 +1832,17 @@ function returnToHome() {
   font-weight: 500;
 }
 
-.clock-card {
+.clock-card,
+.dice-card {
   gap: 1.75rem;
   align-items: center;
   text-align: center;
 }
 
 .clock-interaction,
-.clock-feedback-block {
+.clock-feedback-block,
+.dice-interaction,
+.dice-feedback-block {
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -1606,6 +1893,14 @@ function returnToHome() {
 }
 
 .word-lab-summary .summary-actions {
+  justify-content: center;
+}
+
+.dice-summary {
+  gap: 1.5rem;
+}
+
+.dice-summary .summary-actions {
   justify-content: center;
 }
 
