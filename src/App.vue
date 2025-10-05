@@ -2177,8 +2177,8 @@ function returnToHome() {
 }
 
 .pyramid .cell {
-  width: clamp(3.4rem, 18vw, 5.6rem);
-  height: clamp(3.4rem, 18vw, 5.6rem);
+  width: clamp(3.4rem, 14vw, 5.25rem);
+  height: clamp(3.4rem, 14vw, 5.25rem);
   border-radius: 1.2rem;
   border: 2px solid #d5def5;
   background: #f4f7ff;
