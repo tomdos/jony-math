@@ -23,6 +23,7 @@ import {
   multiplicationDefaultSettings,
   type MultiplicationSettings,
 } from './stores/multiplication'
+import { useWordLabStore, type WordLabSettings } from './stores/words'
 
 const session = useSessionStore()
 const {
@@ -77,6 +78,14 @@ const {
   reviewError: multiplicationReviewError,
 } = storeToRefs(multiplicationStore)
 
+const wordLabStore = useWordLabStore()
+const {
+  phase: wordLabPhase,
+  currentWord: currentReadingWord,
+  totalWords: readingTotalWords,
+  currentStep: readingCurrentStep,
+} = storeToRefs(wordLabStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
@@ -86,10 +95,21 @@ const clockSetupState = reactive<ClockSettings>({ count: 3 })
 clockSetupState.count = clockStore.settings.count
 const multiplicationSetupState = reactive<MultiplicationSettings>({ ...multiplicationDefaultSettings })
 Object.assign(multiplicationSetupState, multiplicationSettings.value)
+const wordLabSetupState = reactive<WordLabSettings>({ letters: 3, count: 5 })
+Object.assign(wordLabSetupState, wordLabStore.settings)
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
-const activeModule = ref<'home' | 'math' | 'arithmetic' | 'multiplication' | 'word' | 'hour'>('home')
+const activeModule = ref<
+  | 'home'
+  | 'math'
+  | 'arithmetic'
+  | 'multiplication'
+  | 'word'
+  | 'hour'
+  | 'czech'
+  | 'wordLab'
+>('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
 const clockAnswer = ref<{ hours: string; minutes: string }>({ hours: '', minutes: '' })
@@ -104,6 +124,12 @@ const multiplicationModeOptions: Array<{ value: MultiplicationSettings['mode']; 
   { value: 'mix', label: 'Smíšené (× / ÷)' },
 ]
 const multiplicationMaxOptions = [10, 20, 30]
+const wordLabLetterOptions: Array<{ value: WordLabSettings['letters']; label: string }> = [
+  { value: 3, label: '3 písmena' },
+  { value: 4, label: '4 písmena' },
+  { value: 5, label: '5 písmen' },
+]
+const wordLabCountOptions = [5, 10, 15]
 
 const modeOptions: Array<{ value: SessionSettings['mode']; label: string }> = [
   { value: 'add', label: 'Sčítání (+)' },
@@ -224,6 +250,14 @@ const multiplicationSummaryResults = computed(() =>
     }
   }),
 )
+
+const wordLabIsQuiz = computed(() => wordLabPhase.value === 'quiz')
+const wordLabProgressPercent = computed(() => {
+  if (!readingTotalWords.value) {
+    return 0
+  }
+  return Math.round(((readingCurrentStep.value - 1) / readingTotalWords.value) * 100)
+})
 
 watch(
   () => phase.value,
@@ -509,6 +543,40 @@ function handleClockNext() {
   clockAnswer.value = { hours: '', minutes: '' }
 }
 
+function handleWordLabStart() {
+  wordLabStore.start({
+    letters: wordLabSetupState.letters,
+    count: wordLabSetupState.count,
+  })
+}
+
+function handleWordLabNext() {
+  wordLabStore.next()
+}
+
+function handleWordLabRestart() {
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
+}
+
+function openCzechLanding() {
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
+  activeModule.value = 'czech'
+}
+
+function openWordLab() {
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
+  activeModule.value = 'wordLab'
+}
+
+function returnToCzechLanding() {
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
+  activeModule.value = 'czech'
+}
+
 function formatQuestionLabel(count: number) {
   if (count === 1) {
     return 'příklad'
@@ -600,6 +668,10 @@ function syncClockSetupFromStore() {
   clockSetupState.count = clockStore.settings.count
 }
 
+function syncWordLabSetupFromStore() {
+  Object.assign(wordLabSetupState, wordLabStore.settings)
+}
+
 function openMathLanding() {
   session.resetSession()
   answerBuffer.value = ''
@@ -613,6 +685,8 @@ function openMathLanding() {
   syncClockSetupFromStore()
   clockFeedback.value = null
   clockAwaitingNext.value = false
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
   activeModule.value = 'math'
 }
 
@@ -638,6 +712,8 @@ function openWordProblems() {
   resetWordAnswer(null)
   multiplicationStore.resetSession()
   Object.assign(multiplicationSetupState, multiplicationSettings.value)
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
   activeModule.value = 'word'
 }
 
@@ -654,6 +730,8 @@ function openHourLab() {
   clockAnswer.value = { hours: '', minutes: '' }
   clockFeedback.value = null
   clockAwaitingNext.value = false
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
   activeModule.value = 'hour'
 }
 
@@ -670,6 +748,8 @@ function returnToMathLanding() {
   clockAnswer.value = { hours: '', minutes: '' }
   clockFeedback.value = null
   clockAwaitingNext.value = false
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
   activeModule.value = 'math'
 }
 
@@ -686,6 +766,8 @@ function returnToHome() {
   clockAnswer.value = { hours: '', minutes: '' }
   clockFeedback.value = null
   clockAwaitingNext.value = false
+  wordLabStore.reset()
+  syncWordLabSetupFromStore()
   activeModule.value = 'home'
 }
 </script>
@@ -703,6 +785,25 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openHourLab">
           Hodinová laboratoř
+        </button>
+        <button type="button" class="secondary-action" @click="openCzechLanding">
+          Česká laboratoř
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'czech'" class="app-shell landing-shell">
+    <section class="card landing-card">
+      <div class="landing-header">
+        <h1>Česká laboratoř</h1>
+        <p>Procvičte si čtení slov nahlas.</p>
+      </div>
+      <div class="landing-options">
+        <button type="button" class="primary-action" @click="openWordLab">
+          Slova
+        </button>
+        <button type="button" class="secondary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
       </div>
     </section>
@@ -950,6 +1051,81 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'wordLab'" class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Čtení slov</h1>
+        <p>Vyberte slova a čtěte je nahlas. Žádné hodnocení, jen trénink.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="handleWordLabRestart">
+          Začít znovu
+        </button>
+        <button type="button" class="header-button" @click="returnToCzechLanding">
+          Zpět na Českou laboratoř
+        </button>
+      </div>
+    </header>
+
+    <section v-if="wordLabPhase === 'setup'" class="card">
+      <form class="setup-form" @submit.prevent="handleWordLabStart">
+        <div class="field-row">
+          <label class="field-label" for="word-lab-length">Délka slov</label>
+          <select id="word-lab-length" v-model.number="wordLabSetupState.letters" class="select">
+            <option v-for="option in wordLabLetterOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="word-lab-count">Počet slov</label>
+          <select id="word-lab-count" v-model.number="wordLabSetupState.count" class="select">
+            <option v-for="count in wordLabCountOptions" :key="count" :value="count">
+              {{ count }} slov
+            </option>
+          </select>
+        </div>
+
+        <button type="submit" class="primary-action">Začít číst</button>
+      </form>
+    </section>
+
+    <section v-else-if="wordLabIsQuiz" class="card word-lab-card">
+      <div class="session-meta">
+        <span class="phase-badge">Čtení</span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Slovo {{ readingCurrentStep }} z {{ readingTotalWords }}
+          </div>
+          <div class="progress-bar">
+            <span class="progress-fill" :style="{ width: wordLabProgressPercent + '%' }"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="word-display">
+        <span class="word-text">{{ currentReadingWord }}</span>
+      </div>
+
+      <button type="button" class="primary-action" @click="handleWordLabNext">
+        Další slovo
+      </button>
+    </section>
+
+    <section v-else class="card word-lab-summary">
+      <h2>Hotovo!</h2>
+      <p>Skvělé, všechna slova jsou přečtena. Můžete začít novou sérii kdykoli.</p>
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="handleWordLabRestart">
+          Číst znovu
+        </button>
+        <button type="button" class="secondary-action" @click="returnToCzechLanding">
+          Zpět na Českou laboratoř
         </button>
       </div>
     </section>
@@ -1384,6 +1560,53 @@ function returnToHome() {
   flex-direction: column;
   gap: 1rem;
   align-items: center;
+}
+
+.word-lab-card {
+  gap: 2rem;
+  align-items: center;
+  text-align: center;
+}
+
+.word-display {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-height: 6rem;
+  border-radius: 1.1rem;
+  background: #f4f7ff;
+  border: 2px solid #d5def5;
+  box-shadow: 0 12px 28px rgba(63, 130, 248, 0.15);
+}
+
+.word-text {
+  font-size: clamp(2.5rem, 10vw, 4rem);
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: #1f2540;
+  text-transform: uppercase;
+}
+
+.word-lab-summary {
+  gap: 1.5rem;
+  text-align: center;
+}
+
+.word-lab-summary h2 {
+  margin: 0;
+  font-size: 1.8rem;
+  color: #1f2540;
+}
+
+.word-lab-summary p {
+  margin: 0;
+  color: #4a5570;
+  font-size: 1rem;
+}
+
+.word-lab-summary .summary-actions {
+  justify-content: center;
 }
 
 .clock-display {
