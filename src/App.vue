@@ -2177,16 +2177,16 @@ function returnToHome() {
 }
 
 .pyramid .cell {
-  width: clamp(3rem, 12vw, 4.5rem);
-  height: clamp(3rem, 12vw, 4.5rem);
-  border-radius: 1rem;
+  width: clamp(3.4rem, 18vw, 5.6rem);
+  height: clamp(3.4rem, 18vw, 5.6rem);
+  border-radius: 1.2rem;
   border: 2px solid #d5def5;
   background: #f4f7ff;
   display: flex;
   justify-content: center;
   align-items: center;
   font-weight: 700;
-  font-size: clamp(1.4rem, 5vw, 2rem);
+  font-size: clamp(1.7rem, 6vw, 2.3rem);
   color: #1f2540;
   box-shadow: 0 12px 24px rgba(63, 130, 248, 0.12);
   text-align: center;
