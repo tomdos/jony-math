@@ -20,6 +20,7 @@ import ClockFace from './components/ClockFace.vue'
 import { useClockStore, type ClockSettings } from './stores/clock'
 import DiceDisplay from './components/DiceDisplay.vue'
 import { useDiceStore, type DiceSettings } from './stores/dice'
+import { usePyramidStore, type PyramidSettings } from './stores/pyramid'
 import {
   useMultiplicationStore,
   multiplicationDefaultSettings,
@@ -97,6 +98,16 @@ const {
   correctCount: diceCorrectCount,
 } = storeToRefs(diceStore)
 
+const pyramidStore = usePyramidStore()
+const {
+  phase: pyramidPhase,
+  totalExercises: pyramidTotalExercises,
+  currentStep: pyramidCurrentStep,
+  correctCount: pyramidCorrectCount,
+  currentEntries: pyramidEntries,
+  exercises: pyramidExercises,
+} = storeToRefs(pyramidStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
@@ -110,6 +121,8 @@ const wordLabSetupState = reactive<WordLabSettings>({ letters: 3, count: 5 })
 Object.assign(wordLabSetupState, wordLabStore.settings)
 const diceSetupState = reactive<DiceSettings>({ diceCount: 2, throwsCount: 5 })
 Object.assign(diceSetupState, diceStore.settings)
+const pyramidSetupState = reactive<PyramidSettings>({ count: 3, max: 20 })
+Object.assign(pyramidSetupState, pyramidStore.settings)
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
@@ -123,6 +136,7 @@ const activeModule = ref<
   | 'czech'
   | 'wordLab'
   | 'dice'
+  | 'pyramid'
 >('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
@@ -133,6 +147,8 @@ const diceAnswer = ref('')
 const diceFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const diceAwaitingNext = ref(false)
 const diceInputRef = ref<HTMLInputElement | null>(null)
+const pyramidAwaitingNext = ref(false)
+const lastCheckWasFailure = ref(false)
 
 const wordCountOptions = [1, 2, 3, 4, 5]
 const clockCountOptions = [1, 2, 3, 4, 5]
@@ -157,6 +173,19 @@ const diceThrowOptions: Array<{ value: DiceSettings['throwsCount']; label: strin
   { value: 5, label: '5 hodů' },
   { value: 6, label: '6 hodů' },
 ]
+const pyramidCountOptions = [1, 2, 3, 4, 5]
+const pyramidMaxOptions = [20, 30, 40, 50]
+
+const pyramidIsCurrentQuiz = computed(() => pyramidPhase.value === 'quiz')
+const pyramidIsLastExercise = computed(() => {
+  if (!pyramidTotalExercises.value) {
+    return true
+  }
+  return pyramidCurrentStep.value === pyramidTotalExercises.value
+})
+const pyramidNextLabel = computed(() =>
+  pyramidIsLastExercise.value ? 'Dokončit' : 'Další pyramida',
+)
 
 const modeOptions: Array<{ value: SessionSettings['mode']; label: string }> = [
   { value: 'add', label: 'Sčítání (+)' },
@@ -309,6 +338,13 @@ const diceSummaryResults = computed(() =>
   })),
 )
 
+const pyramidIncorrectCount = computed(() => {
+  if (!pyramidTotalExercises.value) {
+    return 0
+  }
+  return pyramidTotalExercises.value - pyramidCorrectCount.value
+})
+
 watch(
   () => phase.value,
   (newPhase) => {
@@ -420,6 +456,33 @@ watch(
     diceAwaitingNext.value = false
     diceFeedback.value = null
     focusDiceInput()
+  },
+)
+
+watch(
+  () => pyramidPhase.value,
+  (newPhase) => {
+    if (activeModule.value !== 'pyramid') {
+      return
+    }
+    if (newPhase === 'quiz') {
+      pyramidAwaitingNext.value = false
+      lastCheckWasFailure.value = false
+    } else if (newPhase === 'summary') {
+      pyramidAwaitingNext.value = false
+      lastCheckWasFailure.value = false
+    }
+  },
+)
+
+watch(
+  () => pyramidCurrentStep.value,
+  () => {
+    if (activeModule.value !== 'pyramid') {
+      return
+    }
+    pyramidAwaitingNext.value = false
+    lastCheckWasFailure.value = false
   },
 )
 
@@ -640,6 +703,62 @@ function handleWordLabRestart() {
   syncWordLabSetupFromStore()
 }
 
+function handlePyramidRestart() {
+  pyramidStore.reset()
+  Object.assign(pyramidSetupState, pyramidStore.settings)
+  pyramidAwaitingNext.value = false
+  lastCheckWasFailure.value = false
+}
+
+function startPyramidSession() {
+  pyramidStore.start({
+    count: pyramidSetupState.count,
+    max: pyramidSetupState.max,
+  })
+  pyramidAwaitingNext.value = false
+  lastCheckWasFailure.value = false
+}
+
+function handlePyramidInput(row: number, col: number, event: Event) {
+  const input = event.target as HTMLInputElement
+  const sanitized = sanitizeNumeric(input.value).slice(0, 3)
+  input.value = sanitized
+  const numeric = sanitized === '' ? null : Number(sanitized)
+  pyramidStore.updateEntry(row, col, numeric)
+  if (lastCheckWasFailure.value) {
+    lastCheckWasFailure.value = false
+  }
+}
+
+function handlePyramidCheck() {
+  const allCorrect = pyramidStore.checkCurrent()
+  lastCheckWasFailure.value = !allCorrect
+  if (allCorrect) {
+    pyramidAwaitingNext.value = true
+  }
+}
+
+function handlePyramidNext() {
+  const phase = pyramidStore.next()
+  pyramidAwaitingNext.value = false
+  lastCheckWasFailure.value = false
+  if (phase === 'quiz') {
+    nextTick(() => {
+      const firstEditableRow = pyramidEntries.value.findIndex((row, index, rows) =>
+        index !== rows.length - 1 && row.some((entry) => !entry.readOnly),
+      )
+      if (firstEditableRow < 0) {
+        return
+      }
+      const selector = `.pyramid .row:nth-child(${firstEditableRow + 1}) .cell:not(.locked)`
+      const firstEditableCell = document.querySelector<HTMLInputElement>(selector)
+      firstEditableCell?.focus()
+    })
+  } else {
+    nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
+  }
+}
+
 function openCzechLanding() {
   wordLabStore.reset()
   syncWordLabSetupFromStore()
@@ -665,6 +784,12 @@ function openDiceLab() {
   diceFeedback.value = null
   diceAwaitingNext.value = false
   activeModule.value = 'dice'
+}
+
+function openPyramid() {
+  pyramidStore.reset()
+  Object.assign(pyramidSetupState, pyramidStore.settings)
+  activeModule.value = 'pyramid'
 }
 
 function handleDiceStart() {
@@ -928,6 +1053,8 @@ function returnToMathLanding() {
   diceAnswer.value = ''
   diceFeedback.value = null
   diceAwaitingNext.value = false
+  pyramidStore.reset()
+  Object.assign(pyramidSetupState, pyramidStore.settings)
   activeModule.value = 'math'
 }
 
@@ -1101,6 +1228,9 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openMultiplication">
           Násobení a dělení
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openPyramid">
+          Sčítací pyramida
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openDiceLab">
           Sečti kostky
@@ -1335,6 +1465,130 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'pyramid'" class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Sčítací pyramida</h1>
+        <p>Vyplňte pyramidy správnými součty od základny až po vrchol.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="handlePyramidRestart">
+          Začít znovu
+        </button>
+        <button type="button" class="header-button" @click="returnToMathLanding">
+          Zpět na Matematickou laboratoř
+        </button>
+      </div>
+    </header>
+
+    <section v-if="pyramidPhase === 'setup'" class="card pyramid-card">
+      <form class="setup-form" @submit.prevent="startPyramidSession">
+        <div class="field-row">
+          <label class="field-label" for="pyramid-count">Počet pyramid</label>
+          <select id="pyramid-count" v-model.number="pyramidSetupState.count" class="select">
+            <option v-for="count in pyramidCountOptions" :key="count" :value="count">
+              {{ count }} pyramid
+            </option>
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label class="field-label" for="pyramid-max">Čísla do</label>
+          <select id="pyramid-max" v-model.number="pyramidSetupState.max" class="select">
+            <option v-for="value in pyramidMaxOptions" :key="value" :value="value">
+              {{ value }}
+            </option>
+          </select>
+        </div>
+
+        <button type="submit" class="primary-action">Začít pyramidy</button>
+      </form>
+    </section>
+
+    <section
+      v-else-if="pyramidIsCurrentQuiz"
+      :key="
+        pyramidCurrentStep > 0
+          ? pyramidExercises[pyramidCurrentStep - 1]?.id ?? 'pyramid-quiz'
+          : 'pyramid-quiz'
+      "
+      class="card pyramid-card"
+    >
+      <div class="session-meta">
+        <span class="phase-badge">Pyramida</span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Pyramida {{ pyramidCurrentStep }} z {{ pyramidTotalExercises }}
+          </div>
+        </div>
+      </div>
+
+      <div class="pyramid">
+        <div v-for="(row, rowIndex) in pyramidEntries" :key="`row-${rowIndex}`" class="row" :class="{ base: rowIndex === pyramidEntries.length - 1 }">
+          <input
+            v-for="(entry, colIndex) in row"
+            :key="`cell-${rowIndex}-${colIndex}`"
+            class="cell"
+            type="text"
+            inputmode="numeric"
+            maxlength="3"
+            :value="entry.value ?? ''"
+            :readonly="rowIndex === pyramidEntries.length - 1 || pyramidAwaitingNext"
+            :class="{
+              locked: rowIndex === pyramidEntries.length - 1,
+              error:
+                entry.value === null &&
+                rowIndex !== pyramidEntries.length - 1 &&
+                lastCheckWasFailure,
+              success:
+                entry.value === entry.correct &&
+                rowIndex !== pyramidEntries.length - 1 &&
+                pyramidAwaitingNext,
+            }"
+            @input="handlePyramidInput(rowIndex, colIndex, $event)"
+          />
+        </div>
+      </div>
+
+      <p v-if="lastCheckWasFailure" class="pyramid-note">
+        Některé hodnoty nesedí, zkontrolujte zvýrazněná pole a zkuste to znovu.
+      </p>
+
+      <div class="pyramid-actions">
+        <button v-if="!pyramidAwaitingNext" type="button" class="primary-action" @click="handlePyramidCheck">
+          Zkontrolovat
+        </button>
+        <button v-else type="button" class="primary-action" @click="handlePyramidNext">
+          {{ pyramidNextLabel }}
+        </button>
+      </div>
+    </section>
+
+    <section v-else class="card pyramid-card">
+      <div class="pyramid-summary">
+        <h2>Vyhodnocení pyramid</h2>
+        <p>Celkem dokončeno: {{ pyramidTotalExercises }}.</p>
+        <div class="pyramid-summary-stats">
+          <div class="stat-block success">
+            <span class="label">Správně</span>
+            <span class="value">{{ pyramidCorrectCount }}</span>
+          </div>
+          <div class="stat-block error">
+            <span class="label">Chybných</span>
+            <span class="value">{{ pyramidIncorrectCount }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="handlePyramidRestart">
+          Začít znovu
+        </button>
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
+          Zpět na Matematickou laboratoř
         </button>
       </div>
     </section>
@@ -1902,6 +2156,113 @@ function returnToHome() {
 
 .dice-summary .summary-actions {
   justify-content: center;
+}
+
+.pyramid-card {
+  gap: 2rem;
+  align-items: center;
+  text-align: center;
+}
+
+.pyramid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.pyramid .row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.pyramid .cell {
+  width: clamp(3rem, 12vw, 4.5rem);
+  height: clamp(3rem, 12vw, 4.5rem);
+  border-radius: 1rem;
+  border: 2px solid #d5def5;
+  background: #f4f7ff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: 700;
+  font-size: clamp(1.4rem, 5vw, 2rem);
+  color: #1f2540;
+  box-shadow: 0 12px 24px rgba(63, 130, 248, 0.12);
+  text-align: center;
+  font-family: inherit;
+  outline: none;
+}
+
+.pyramid .cell.locked {
+  background: #e9f0ff;
+  border-color: #bbc7ed;
+  pointer-events: none;
+}
+
+.pyramid .cell.success {
+  border-color: #3f9c4a;
+  background: #e4f8e7;
+}
+
+.pyramid .cell.error {
+  border-color: #e2583e;
+  background: #ffe7e1;
+}
+
+.pyramid .row.base .cell {
+  background: #e9f0ff;
+}
+
+.pyramid-note {
+  margin: 0;
+  color: #4a5570;
+  font-size: 0.95rem;
+}
+
+.pyramid-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  align-items: center;
+  text-align: center;
+}
+
+.pyramid-summary-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.stat-block {
+  min-width: 9rem;
+  padding: 1rem 1.25rem;
+  border-radius: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.stat-block .label {
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.stat-block .value {
+  font-size: 2.3rem;
+}
+
+.stat-block.success {
+  background: #ecfdf3;
+  color: #1a7f3c;
+}
+
+.stat-block.error {
+  background: #fff1f0;
+  color: #b42318;
 }
 
 .clock-display {
