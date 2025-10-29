@@ -194,7 +194,7 @@ const modeOptions: Array<{ value: SessionSettings['mode']; label: string }> = [
 ]
 
 const countOptions = [1, 2, 5, 10, 15, 20, 25]
-const maxOptions = [20, 30, 40, 50]
+const maxOptions = [20, 30, 50, 70, 100]
 
 const isQuizPhase = computed(() => phase.value === 'quiz' || phase.value === 'review')
 const isReview = computed(() => phase.value === 'review')
