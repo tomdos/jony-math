@@ -2177,8 +2177,8 @@ function returnToHome() {
 }
 
 .pyramid .cell {
-  width: clamp(3.4rem, 14vw, 5.25rem);
-  height: clamp(3.4rem, 14vw, 5.25rem);
+  width: clamp(3.6rem, 17vw, 5.6rem);
+  height: clamp(3.6rem, 17vw, 5.6rem);
   border-radius: 1.2rem;
   border: 2px solid #d5def5;
   background: #f4f7ff;
@@ -2186,7 +2186,7 @@ function returnToHome() {
   justify-content: center;
   align-items: center;
   font-weight: 700;
-  font-size: clamp(1.7rem, 6vw, 2.3rem);
+  font-size: clamp(1.5rem, 5.5vw, 2.2rem);
   color: #1f2540;
   box-shadow: 0 12px 24px rgba(63, 130, 248, 0.12);
   text-align: center;
