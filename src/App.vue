@@ -576,18 +576,6 @@ function handleMultiplicationSubmit() {
   }
 }
 
-function handleRestart() {
-  session.resetSession()
-  answerBuffer.value = ''
-  Object.assign(setupState, settings.value)
-}
-
-function handleMultiplicationRestart() {
-  multiplicationStore.resetSession()
-  answerBuffer.value = ''
-  Object.assign(multiplicationSetupState, multiplicationSettings.value)
-}
-
 const questionLabel = computed(() =>
   isReview.value ? 'Opakování chyb' : 'Nové cvičení',
 )
@@ -623,12 +611,6 @@ function handleWordSubmit() {
       wordCardRef.value?.focus()
     })
   }
-}
-
-function handleWordRestart() {
-  wordStore.resetSession()
-  syncWordSetupFromStore()
-  resetWordAnswer(null)
 }
 
 function handleClockStart() {
@@ -669,14 +651,6 @@ function handleClockSubmit() {
   clockAwaitingNext.value = true
 }
 
-function handleClockRestart() {
-  clockStore.reset()
-  syncClockSetupFromStore()
-  clockAnswer.value = { hours: '', minutes: '' }
-  clockFeedback.value = null
-  clockAwaitingNext.value = false
-}
-
 function handleClockNext() {
   if (clockStore.phase !== 'quiz') {
     return
@@ -696,18 +670,6 @@ function handleWordLabStart() {
 
 function handleWordLabNext() {
   wordLabStore.next()
-}
-
-function handleWordLabRestart() {
-  wordLabStore.reset()
-  syncWordLabSetupFromStore()
-}
-
-function handlePyramidRestart() {
-  pyramidStore.reset()
-  Object.assign(pyramidSetupState, pyramidStore.settings)
-  pyramidAwaitingNext.value = false
-  lastCheckWasFailure.value = false
 }
 
 function startPyramidSession() {
@@ -832,14 +794,6 @@ function handleDiceNext() {
   diceFeedback.value = null
   diceAwaitingNext.value = false
   focusDiceInput()
-}
-
-function handleDiceRestart() {
-  diceStore.reset()
-  Object.assign(diceSetupState, diceStore.settings)
-  diceAnswer.value = ''
-  diceFeedback.value = null
-  diceAwaitingNext.value = false
 }
 
 function focusDiceInput() {
@@ -1109,8 +1063,8 @@ function returnToHome() {
         <p>Podívej se na kostky a spočítej jejich součet.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="header-button" @click="handleDiceRestart">
-          Začít znovu
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="header-button" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1191,8 +1145,8 @@ function returnToHome() {
         :results="diceSummaryResults"
       />
       <div class="summary-actions">
-        <button type="button" class="primary-action" @click="handleDiceRestart">
-          Začít novou sérii
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1251,8 +1205,8 @@ function returnToHome() {
         <p>Blesková cvičení pro jistotu v počítání.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="header-button" @click="handleRestart">
-          Začít znovu
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="header-button" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1349,8 +1303,8 @@ function returnToHome() {
         :results="arithmeticSummaryResults"
       />
       <div class="summary-actions">
-        <button type="button" class="primary-action" @click="handleRestart">
-          Začít nové cvičení
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1365,8 +1319,8 @@ function returnToHome() {
         <p>Krátké příklady na procvičení tabulek násobení a dělení.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="header-button" @click="handleMultiplicationRestart">
-          Začít znovu
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="header-button" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1460,8 +1414,8 @@ function returnToHome() {
         :results="multiplicationSummaryResults"
       />
       <div class="summary-actions">
-        <button type="button" class="primary-action" @click="handleMultiplicationRestart">
-          Spustit nové procvičování
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1476,8 +1430,8 @@ function returnToHome() {
         <p>Vyplňte pyramidy správnými součty od základny až po vrchol.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="header-button" @click="handlePyramidRestart">
-          Začít znovu
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="header-button" @click="returnToMathLanding">
           Zpět na Matematickou laboratoř
@@ -1584,8 +1538,8 @@ function returnToHome() {
         </div>
       </div>
       <div class="summary-actions">
-        <button type="button" class="primary-action" @click="handlePyramidRestart">
-          Začít znovu
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Zpět na Matematickou laboratoř
@@ -1600,8 +1554,8 @@ function returnToHome() {
         <p>Vyberte slova a čtěte je nahlas. Žádné hodnocení, jen trénink.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="header-button" @click="handleWordLabRestart">
-          Začít znovu
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="header-button" @click="returnToCzechLanding">
           Zpět na Českou laboratoř
@@ -1659,8 +1613,8 @@ function returnToHome() {
       <h2>Hotovo!</h2>
       <p>Skvělé, všechna slova jsou přečtena. Můžete začít novou sérii kdykoli.</p>
       <div class="summary-actions">
-        <button type="button" class="primary-action" @click="handleWordLabRestart">
-          Číst znovu
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="secondary-action" @click="returnToCzechLanding">
           Zpět na Českou laboratoř
@@ -1675,8 +1629,8 @@ function returnToHome() {
         <p>Procvičte si porozumění zadání a převeďte text na rovnici.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="header-button" @click="handleWordRestart">
-          Začít znovu
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="header-button" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1743,8 +1697,8 @@ function returnToHome() {
         :results="wordSummaryResults"
       />
       <div class="summary-actions">
-        <button type="button" class="primary-action" @click="handleWordRestart">
-          Začít nové procvičování
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Jiná matematická úloha
@@ -1759,9 +1713,6 @@ function returnToHome() {
         <p>Procvičte si čtení času z analogových hodin.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="header-button" @click="handleClockRestart">
-          Začít znovu
-        </button>
         <button type="button" class="header-button" @click="returnToHome">
           Zpět na Mozkolaboratoř
         </button>
@@ -1843,10 +1794,7 @@ function returnToHome() {
         :results="[]"
       />
       <div class="summary-actions">
-        <button type="button" class="primary-action" @click="handleClockRestart">
-          Začít znovu
-        </button>
-        <button type="button" class="secondary-action" @click="returnToHome">
+        <button type="button" class="primary-action" @click="returnToHome">
           Zpět na Mozkolaboratoř
         </button>
       </div>
