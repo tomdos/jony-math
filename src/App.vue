@@ -27,6 +27,12 @@ import {
   type MultiplicationSettings,
 } from './stores/multiplication'
 import { useWordLabStore, type WordLabSettings } from './stores/words'
+import {
+  useComparisonStore,
+  comparisonDefaultSettings,
+  type ComparisonSettings,
+  type ComparisonOperator,
+} from './stores/comparison'
 
 const session = useSessionStore()
 const {
@@ -108,6 +114,15 @@ const {
   exercises: pyramidExercises,
 } = storeToRefs(pyramidStore)
 
+const comparisonStore = useComparisonStore()
+const {
+  phase: comparisonPhase,
+  totalExercises: comparisonTotalExercises,
+  currentStep: comparisonCurrentStep,
+  correctCount: comparisonCorrectCount,
+  currentExercise: comparisonCurrentExercise,
+} = storeToRefs(comparisonStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
@@ -123,6 +138,8 @@ const diceSetupState = reactive<DiceSettings>({ diceCount: 2, throwsCount: 5 })
 Object.assign(diceSetupState, diceStore.settings)
 const pyramidSetupState = reactive<PyramidSettings>({ count: 3, max: 20 })
 Object.assign(pyramidSetupState, pyramidStore.settings)
+const comparisonSetupState = reactive<ComparisonSettings>({ ...comparisonDefaultSettings })
+Object.assign(comparisonSetupState, comparisonStore.settings)
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
@@ -137,6 +154,7 @@ const activeModule = ref<
   | 'wordLab'
   | 'dice'
   | 'pyramid'
+  | 'comparison'
 >('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
@@ -149,6 +167,9 @@ const diceAwaitingNext = ref(false)
 const diceInputRef = ref<HTMLInputElement | null>(null)
 const pyramidAwaitingNext = ref(false)
 const lastCheckWasFailure = ref(false)
+const comparisonSelection = ref<ComparisonOperator | null>(null)
+const comparisonFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const comparisonAwaitingNext = ref(false)
 
 const wordCountOptions = [1, 2, 3, 4, 5]
 const clockCountOptions = [1, 2, 3, 4, 5]
@@ -175,6 +196,8 @@ const diceThrowOptions: Array<{ value: DiceSettings['throwsCount']; label: strin
 ]
 const pyramidCountOptions = [1, 2, 3, 4, 5]
 const pyramidMaxOptions = [20, 30, 40, 50]
+const comparisonCountOptions = [1, 2, 5, 10, 15, 20]
+const comparisonOperators: ComparisonOperator[] = ['>', '<', '=']
 
 const pyramidIsCurrentQuiz = computed(() => pyramidPhase.value === 'quiz')
 const pyramidIsLastExercise = computed(() => {
@@ -345,6 +368,24 @@ const pyramidIncorrectCount = computed(() => {
   return pyramidTotalExercises.value - pyramidCorrectCount.value
 })
 
+const comparisonIncorrectCount = computed(() => {
+  if (!comparisonTotalExercises.value) {
+    return 0
+  }
+  return comparisonTotalExercises.value - comparisonCorrectCount.value
+})
+
+const comparisonIsLastExercise = computed(() => {
+  if (!comparisonTotalExercises.value) {
+    return true
+  }
+  return comparisonCurrentStep.value === comparisonTotalExercises.value
+})
+
+const comparisonNextLabel = computed(() =>
+  comparisonIsLastExercise.value ? 'Zobrazit výsledky' : 'Další úloha',
+)
+
 watch(
   () => phase.value,
   (newPhase) => {
@@ -456,6 +497,34 @@ watch(
     diceAwaitingNext.value = false
     diceFeedback.value = null
     focusDiceInput()
+  },
+)
+
+watch(
+  () => comparisonPhase.value,
+  (newPhase) => {
+    if (activeModule.value !== 'comparison') {
+      return
+    }
+    if (newPhase === 'quiz') {
+      comparisonSelection.value = null
+      comparisonFeedback.value = null
+      comparisonAwaitingNext.value = false
+    } else if (newPhase === 'summary') {
+      comparisonAwaitingNext.value = false
+    }
+  },
+)
+
+watch(
+  () => comparisonCurrentStep.value,
+  () => {
+    if (activeModule.value !== 'comparison') {
+      return
+    }
+    comparisonSelection.value = null
+    comparisonFeedback.value = null
+    comparisonAwaitingNext.value = false
   },
 )
 
@@ -721,6 +790,46 @@ function handlePyramidNext() {
   }
 }
 
+function handleComparisonStart() {
+  comparisonStore.start({ count: comparisonSetupState.count })
+  comparisonSelection.value = null
+  comparisonFeedback.value = null
+  comparisonAwaitingNext.value = false
+}
+
+function handleComparisonSelect(operator: ComparisonOperator) {
+  if (comparisonPhase.value !== 'quiz') {
+    return
+  }
+  if (comparisonAwaitingNext.value) {
+    return
+  }
+  comparisonSelection.value = operator
+  const result = comparisonStore.evaluateSelection(operator)
+  const exercise = comparisonCurrentExercise.value
+  if (result.correct) {
+    comparisonFeedback.value = {
+      type: 'success',
+      text: exercise
+        ? `${exercise.left} ${exercise.correct} ${exercise.right} — správně!`
+        : 'Správně!'
+    }
+    comparisonAwaitingNext.value = true
+  } else {
+    comparisonFeedback.value = {
+      type: 'error',
+      text: 'To není správně, zkuste jiný znak.',
+    }
+  }
+}
+
+function handleComparisonNext() {
+  comparisonStore.next()
+  comparisonSelection.value = null
+  comparisonFeedback.value = null
+  comparisonAwaitingNext.value = false
+}
+
 function openCzechLanding() {
   wordLabStore.reset()
   syncWordLabSetupFromStore()
@@ -752,6 +861,15 @@ function openPyramid() {
   pyramidStore.reset()
   Object.assign(pyramidSetupState, pyramidStore.settings)
   activeModule.value = 'pyramid'
+}
+
+function openComparison() {
+  comparisonStore.reset()
+  Object.assign(comparisonSetupState, comparisonStore.settings)
+  comparisonSelection.value = null
+  comparisonFeedback.value = null
+  comparisonAwaitingNext.value = false
+  activeModule.value = 'comparison'
 }
 
 function handleDiceStart() {
@@ -1009,6 +1127,11 @@ function returnToMathLanding() {
   diceAwaitingNext.value = false
   pyramidStore.reset()
   Object.assign(pyramidSetupState, pyramidStore.settings)
+  comparisonStore.reset()
+  Object.assign(comparisonSetupState, comparisonStore.settings)
+  comparisonSelection.value = null
+  comparisonFeedback.value = null
+  comparisonAwaitingNext.value = false
   activeModule.value = 'math'
 }
 
@@ -1032,6 +1155,11 @@ function returnToHome() {
   diceAnswer.value = ''
   diceFeedback.value = null
   diceAwaitingNext.value = false
+  comparisonStore.reset()
+  Object.assign(comparisonSetupState, comparisonStore.settings)
+  comparisonSelection.value = null
+  comparisonFeedback.value = null
+  comparisonAwaitingNext.value = false
   activeModule.value = 'home'
 }
 </script>
@@ -1182,6 +1310,9 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openMultiplication">
           Násobení a dělení
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openComparison">
+          Porovnávání čísel
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openPyramid">
           Sčítací pyramida
@@ -1543,6 +1674,107 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action" @click="returnToMathLanding">
           Zpět na Matematickou laboratoř
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'comparison'" class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Porovnej čísla</h1>
+        <p>Vyberte správné znaménko mezi dvěma čísly.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+        <button type="button" class="header-button" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </header>
+
+    <section v-if="comparisonPhase === 'setup'" class="card comparison-card">
+      <form class="setup-form" @submit.prevent="handleComparisonStart">
+        <div class="field-row">
+          <label class="field-label" for="comparison-count">Počet úloh</label>
+          <select id="comparison-count" v-model.number="comparisonSetupState.count" class="select">
+            <option v-for="count in comparisonCountOptions" :key="count" :value="count">
+              {{ count }} {{ formatQuestionLabel(count) }}
+            </option>
+          </select>
+        </div>
+        <button type="submit" class="primary-action">Začít porovnávat</button>
+      </form>
+    </section>
+
+    <section v-else-if="comparisonPhase === 'quiz'" class="card comparison-card">
+      <div class="session-meta">
+        <span class="phase-badge">Porovnávání</span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Úloha {{ comparisonCurrentStep }} z {{ comparisonTotalExercises }}
+          </div>
+        </div>
+      </div>
+
+      <div class="comparison-problem">
+        <span class="comparison-number">{{ comparisonCurrentExercise?.left ?? '–' }}</span>
+        <span class="comparison-placeholder" :class="{ filled: comparisonSelection }">
+          {{ comparisonSelection ?? '?' }}
+        </span>
+        <span class="comparison-number">{{ comparisonCurrentExercise?.right ?? '–' }}</span>
+      </div>
+
+      <div class="comparison-options">
+        <button
+          v-for="operator in comparisonOperators"
+          :key="operator"
+          type="button"
+          class="comparison-option"
+          :class="{ active: comparisonSelection === operator && !comparisonAwaitingNext }"
+          @click="handleComparisonSelect(operator)"
+        >
+          {{ operator }}
+        </button>
+      </div>
+
+      <p v-if="comparisonFeedback" :class="['comparison-feedback', comparisonFeedback.type]">
+        {{ comparisonFeedback.text }}
+      </p>
+
+      <div class="comparison-actions">
+        <button
+          type="button"
+          class="primary-action"
+          :disabled="!comparisonAwaitingNext"
+          @click="handleComparisonNext"
+        >
+          {{ comparisonNextLabel }}
+        </button>
+      </div>
+    </section>
+
+    <section v-else class="card comparison-card">
+      <div class="comparison-summary">
+        <h2>Vyhodnocení porovnávání</h2>
+        <div class="comparison-summary-stats">
+          <div class="stat-block success">
+            <span class="label">Správně</span>
+            <span class="value">{{ comparisonCorrectCount }}</span>
+          </div>
+          <div class="stat-block error">
+            <span class="label">Chybných</span>
+            <span class="value">{{ comparisonIncorrectCount }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
+          Jiná matematická úloha
         </button>
       </div>
     </section>
@@ -2211,6 +2443,102 @@ function returnToHome() {
 .stat-block.error {
   background: #fff1f0;
   color: #b42318;
+}
+
+.comparison-card {
+  gap: 2rem;
+  align-items: center;
+  text-align: center;
+}
+
+.comparison-problem {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(2rem, 10vw, 3.5rem);
+  font-weight: 700;
+  color: #1f2540;
+}
+
+.comparison-number {
+  min-width: 4rem;
+}
+
+.comparison-placeholder {
+  width: clamp(3.6rem, 14vw, 5rem);
+  height: clamp(3.6rem, 14vw, 5rem);
+  border-radius: 1.25rem;
+  border: 2px dashed #c6d3f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(2rem, 9vw, 3rem);
+  font-weight: 800;
+  color: #8c96b7;
+}
+
+.comparison-placeholder.filled {
+  border-style: solid;
+  border-color: #3f82ff;
+  color: #1f2540;
+}
+
+.comparison-options {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.comparison-option {
+  min-width: 3.5rem;
+  min-height: 3.5rem;
+  border-radius: 1rem;
+  border: 2px solid #d5def5;
+  background: #f5f8ff;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #1f2540;
+  transition: all 0.2s ease;
+}
+
+.comparison-option:hover,
+.comparison-option.active {
+  border-color: #3f82ff;
+  background: #e6efff;
+}
+
+.comparison-feedback {
+  margin: 0;
+  font-weight: 600;
+}
+
+.comparison-feedback.success {
+  color: #1a7f3c;
+}
+
+.comparison-feedback.error {
+  color: #b42318;
+}
+
+.comparison-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.comparison-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.comparison-summary-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .clock-display {
