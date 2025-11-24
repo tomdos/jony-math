@@ -33,6 +33,11 @@ import {
   type ComparisonSettings,
   type ComparisonOperator,
 } from './stores/comparison'
+import {
+  useDecompositionStore,
+  decompositionDefaultSettings,
+  type DecompositionSettings,
+} from './stores/decomposition'
 
 const session = useSessionStore()
 const {
@@ -123,6 +128,15 @@ const {
   currentExercise: comparisonCurrentExercise,
 } = storeToRefs(comparisonStore)
 
+const decompositionStore = useDecompositionStore()
+const {
+  phase: decompositionPhase,
+  totalExercises: decompositionTotalExercises,
+  currentStep: decompositionCurrentStep,
+  correctCount: decompositionCorrectCount,
+  currentExercise: decompositionCurrentExercise,
+} = storeToRefs(decompositionStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
@@ -140,6 +154,8 @@ const pyramidSetupState = reactive<PyramidSettings>({ count: 3, max: 20 })
 Object.assign(pyramidSetupState, pyramidStore.settings)
 const comparisonSetupState = reactive<ComparisonSettings>({ ...comparisonDefaultSettings })
 Object.assign(comparisonSetupState, comparisonStore.settings)
+const decompositionSetupState = reactive<DecompositionSettings>({ ...decompositionDefaultSettings })
+Object.assign(decompositionSetupState, decompositionStore.settings)
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
@@ -155,6 +171,7 @@ const activeModule = ref<
   | 'dice'
   | 'pyramid'
   | 'comparison'
+  | 'decomposition'
 >('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
@@ -170,6 +187,10 @@ const lastCheckWasFailure = ref(false)
 const comparisonSelection = ref<ComparisonOperator | null>(null)
 const comparisonFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const comparisonAwaitingNext = ref(false)
+const decompositionInputA = ref('')
+const decompositionInputB = ref('')
+const decompositionFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const decompositionAwaitingNext = ref(false)
 
 const wordCountOptions = [1, 2, 3, 4, 5]
 const clockCountOptions = [1, 2, 3, 4, 5]
@@ -198,6 +219,7 @@ const pyramidCountOptions = [1, 2, 3, 4, 5]
 const pyramidMaxOptions = [20, 30, 40, 50]
 const comparisonCountOptions = [1, 2, 5, 10, 15, 20]
 const comparisonOperators: ComparisonOperator[] = ['>', '<', '=']
+const decompositionCountOptions = [1, 2, 5, 10, 15, 20]
 
 const pyramidIsCurrentQuiz = computed(() => pyramidPhase.value === 'quiz')
 const pyramidIsLastExercise = computed(() => {
@@ -386,6 +408,24 @@ const comparisonNextLabel = computed(() =>
   comparisonIsLastExercise.value ? 'Zobrazit výsledky' : 'Další úloha',
 )
 
+const decompositionIncorrectCount = computed(() => {
+  if (!decompositionTotalExercises.value) {
+    return 0
+  }
+  return decompositionTotalExercises.value - decompositionCorrectCount.value
+})
+
+const decompositionIsLastExercise = computed(() => {
+  if (!decompositionTotalExercises.value) {
+    return true
+  }
+  return decompositionCurrentStep.value === decompositionTotalExercises.value
+})
+
+const decompositionNextLabel = computed(() =>
+  decompositionIsLastExercise.value ? 'Zobrazit výsledky' : 'Další úloha',
+)
+
 watch(
   () => phase.value,
   (newPhase) => {
@@ -525,6 +565,36 @@ watch(
     comparisonSelection.value = null
     comparisonFeedback.value = null
     comparisonAwaitingNext.value = false
+  },
+)
+
+watch(
+  () => decompositionPhase.value,
+  (newPhase) => {
+    if (activeModule.value !== 'decomposition') {
+      return
+    }
+    if (newPhase === 'quiz') {
+      decompositionInputA.value = ''
+      decompositionInputB.value = ''
+      decompositionFeedback.value = null
+      decompositionAwaitingNext.value = false
+    } else if (newPhase === 'summary') {
+      decompositionAwaitingNext.value = false
+    }
+  },
+)
+
+watch(
+  () => decompositionCurrentStep.value,
+  () => {
+    if (activeModule.value !== 'decomposition') {
+      return
+    }
+    decompositionInputA.value = ''
+    decompositionInputB.value = ''
+    decompositionFeedback.value = null
+    decompositionAwaitingNext.value = false
   },
 )
 
@@ -830,6 +900,65 @@ function handleComparisonNext() {
   comparisonAwaitingNext.value = false
 }
 
+function handleDecompositionStart() {
+  decompositionStore.start({ count: decompositionSetupState.count })
+  decompositionInputA.value = ''
+  decompositionInputB.value = ''
+  decompositionFeedback.value = null
+  decompositionAwaitingNext.value = false
+}
+
+function handleDecompositionInput(field: 'a' | 'b', event: Event) {
+  const input = event.target as HTMLInputElement
+  const sanitized = sanitizeNumeric(input.value).slice(0, 3)
+  input.value = sanitized
+  if (field === 'a') {
+    decompositionInputA.value = sanitized
+  } else {
+    decompositionInputB.value = sanitized
+  }
+}
+
+function handleDecompositionSubmit() {
+  if (decompositionAwaitingNext.value || decompositionPhase.value !== 'quiz') {
+    return
+  }
+  const valueA = decompositionInputA.value.trim()
+  const valueB = decompositionInputB.value.trim()
+  if (!valueA || !valueB) {
+    return
+  }
+  const a = Number(valueA)
+  const b = Number(valueB)
+  if (Number.isNaN(a) || Number.isNaN(b)) {
+    return
+  }
+  const result = decompositionStore.evaluateParts({ a, b })
+  const exercise = decompositionCurrentExercise.value
+  if (result.correct) {
+    decompositionFeedback.value = {
+      type: 'success',
+      text: exercise ? `${exercise.total} = ${a} + ${b}` : 'Správně!',
+    }
+    decompositionAwaitingNext.value = true
+  } else {
+    decompositionFeedback.value = {
+      type: 'error',
+      text: exercise ? `${exercise.total} ≠ ${a} + ${b}. Zkuste to znovu.` : 'Zkuste to znovu.',
+    }
+    decompositionInputA.value = ''
+    decompositionInputB.value = ''
+  }
+}
+
+function handleDecompositionNext() {
+  decompositionStore.next()
+  decompositionInputA.value = ''
+  decompositionInputB.value = ''
+  decompositionFeedback.value = null
+  decompositionAwaitingNext.value = false
+}
+
 function openCzechLanding() {
   wordLabStore.reset()
   syncWordLabSetupFromStore()
@@ -870,6 +999,16 @@ function openComparison() {
   comparisonFeedback.value = null
   comparisonAwaitingNext.value = false
   activeModule.value = 'comparison'
+}
+
+function openDecomposition() {
+  decompositionStore.reset()
+  Object.assign(decompositionSetupState, decompositionStore.settings)
+  decompositionInputA.value = ''
+  decompositionInputB.value = ''
+  decompositionFeedback.value = null
+  decompositionAwaitingNext.value = false
+  activeModule.value = 'decomposition'
 }
 
 function handleDiceStart() {
@@ -1132,6 +1271,12 @@ function returnToMathLanding() {
   comparisonSelection.value = null
   comparisonFeedback.value = null
   comparisonAwaitingNext.value = false
+  decompositionStore.reset()
+  Object.assign(decompositionSetupState, decompositionStore.settings)
+  decompositionInputA.value = ''
+  decompositionInputB.value = ''
+  decompositionFeedback.value = null
+  decompositionAwaitingNext.value = false
   activeModule.value = 'math'
 }
 
@@ -1160,6 +1305,12 @@ function returnToHome() {
   comparisonSelection.value = null
   comparisonFeedback.value = null
   comparisonAwaitingNext.value = false
+  decompositionStore.reset()
+  Object.assign(decompositionSetupState, decompositionStore.settings)
+  decompositionInputA.value = ''
+  decompositionInputB.value = ''
+  decompositionFeedback.value = null
+  decompositionAwaitingNext.value = false
   activeModule.value = 'home'
 }
 </script>
@@ -1313,6 +1464,9 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openComparison">
           Porovnávání čísel
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openDecomposition">
+          Rozlož čísla
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openPyramid">
           Sčítací pyramida
@@ -1766,6 +1920,122 @@ function returnToHome() {
           <div class="stat-block error">
             <span class="label">Chybných</span>
             <span class="value">{{ comparisonIncorrectCount }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'decomposition'" class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Rozlož čísla</h1>
+        <p>Rozdělte číslo na dvě částky, které dávají správný součet.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+        <button type="button" class="header-button" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </header>
+
+    <section v-if="decompositionPhase === 'setup'" class="card decomposition-card">
+      <form class="setup-form" @submit.prevent="handleDecompositionStart">
+        <div class="field-row">
+          <label class="field-label" for="decomposition-count">Počet úloh</label>
+          <select
+            id="decomposition-count"
+            v-model.number="decompositionSetupState.count"
+            class="select"
+          >
+            <option v-for="count in decompositionCountOptions" :key="count" :value="count">
+              {{ count }} {{ formatQuestionLabel(count) }}
+            </option>
+          </select>
+        </div>
+        <button type="submit" class="primary-action">Začít rozkládat</button>
+      </form>
+    </section>
+
+    <section v-else-if="decompositionPhase === 'quiz'" class="card decomposition-card">
+      <div class="session-meta">
+        <span class="phase-badge">Rozklad</span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Úloha {{ decompositionCurrentStep }} z {{ decompositionTotalExercises }}
+          </div>
+        </div>
+      </div>
+
+      <div class="decomposition-problem">
+        <span class="decomposition-total">{{ decompositionCurrentExercise?.total ?? '–' }}</span>
+        <span class="decomposition-equals">=</span>
+        <input
+          type="text"
+          inputmode="numeric"
+          maxlength="3"
+          class="decomposition-input"
+          :value="decompositionInputA"
+          :readonly="decompositionAwaitingNext"
+          @input="handleDecompositionInput('a', $event)"
+        />
+        <span class="decomposition-plus">+</span>
+        <input
+          type="text"
+          inputmode="numeric"
+          maxlength="3"
+          class="decomposition-input"
+          :value="decompositionInputB"
+          :readonly="decompositionAwaitingNext"
+          @input="handleDecompositionInput('b', $event)"
+        />
+      </div>
+
+      <p v-if="decompositionFeedback" :class="['decomposition-feedback', decompositionFeedback.type]">
+        {{ decompositionFeedback.text }}
+      </p>
+
+      <div class="decomposition-actions">
+        <button
+          type="button"
+          class="primary-action"
+          :disabled="decompositionAwaitingNext"
+          @click="handleDecompositionSubmit"
+        >
+          Zkontrolovat
+        </button>
+        <button
+          type="button"
+          class="primary-action"
+          :disabled="!decompositionAwaitingNext"
+          @click="handleDecompositionNext"
+        >
+          {{ decompositionNextLabel }}
+        </button>
+      </div>
+    </section>
+
+    <section v-else class="card decomposition-card">
+      <div class="comparison-summary">
+        <h2>Vyhodnocení rozkladů</h2>
+        <div class="comparison-summary-stats">
+          <div class="stat-block success">
+            <span class="label">Správně</span>
+            <span class="value">{{ decompositionCorrectCount }}</span>
+          </div>
+          <div class="stat-block error">
+            <span class="label">Chybných</span>
+            <span class="value">{{ decompositionIncorrectCount }}</span>
           </div>
         </div>
       </div>
@@ -2539,6 +2809,68 @@ function returnToHome() {
   gap: 1rem;
   flex-wrap: wrap;
   justify-content: center;
+}
+
+.decomposition-card {
+  gap: 2rem;
+  align-items: center;
+  text-align: center;
+}
+
+.decomposition-problem {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  font-size: clamp(1.5rem, 6vw, 2.5rem);
+  font-weight: 700;
+}
+
+.decomposition-total {
+  font-size: clamp(2rem, 7vw, 3rem);
+}
+
+.decomposition-input {
+  width: clamp(3.6rem, 16vw, 5.4rem);
+  height: clamp(3.4rem, 14vw, 5.2rem);
+  border-radius: 1.2rem;
+  border: 2px solid #d5def5;
+  text-align: center;
+  font-size: clamp(1.6rem, 5.5vw, 2.2rem);
+  font-weight: 700;
+  background: #f7f8ff;
+  outline: none;
+}
+
+.decomposition-input:focus {
+  border-color: #3f82ff;
+  box-shadow: 0 0 0 3px rgba(63, 130, 255, 0.2);
+}
+
+.decomposition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.decomposition-actions .primary-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.decomposition-feedback {
+  margin: 0;
+  font-weight: 600;
+}
+
+.decomposition-feedback.success {
+  color: #1a7f3c;
+}
+
+.decomposition-feedback.error {
+  color: #b42318;
 }
 
 .clock-display {
