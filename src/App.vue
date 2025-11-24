@@ -38,6 +38,11 @@ import {
   decompositionDefaultSettings,
   type DecompositionSettings,
 } from './stores/decomposition'
+import {
+  useNumberWritingStore,
+  numberWritingDefaultSettings,
+  type NumberWritingSettings,
+} from './stores/numberWriting'
 
 const session = useSessionStore()
 const {
@@ -137,6 +142,15 @@ const {
   currentExercise: decompositionCurrentExercise,
 } = storeToRefs(decompositionStore)
 
+const numberWritingStore = useNumberWritingStore()
+const {
+  phase: numberWritingPhase,
+  totalExercises: numberWritingTotalExercises,
+  currentStep: numberWritingCurrentStep,
+  correctCount: numberWritingCorrectCount,
+  currentExercise: numberWritingCurrentExercise,
+} = storeToRefs(numberWritingStore)
+
 const setupState = reactive<SessionSettings>({ ...defaultSettings })
 Object.assign(setupState, settings.value)
 
@@ -156,6 +170,8 @@ const comparisonSetupState = reactive<ComparisonSettings>({ ...comparisonDefault
 Object.assign(comparisonSetupState, comparisonStore.settings)
 const decompositionSetupState = reactive<DecompositionSettings>({ ...decompositionDefaultSettings })
 Object.assign(decompositionSetupState, decompositionStore.settings)
+const numberWritingSetupState = reactive<NumberWritingSettings>({ ...numberWritingDefaultSettings })
+Object.assign(numberWritingSetupState, numberWritingStore.settings)
 
 const answerBuffer = ref('')
 const cardRef = ref<InstanceType<typeof ProblemCard> | null>(null)
@@ -172,6 +188,7 @@ const activeModule = ref<
   | 'pyramid'
   | 'comparison'
   | 'decomposition'
+  | 'numberWriting'
 >('home')
 const wordCardRef = ref<InstanceType<typeof WordProblemCard> | null>(null)
 const wordAnswer = ref<WordModuleResponse>({ a: null, op: null, b: null, result: null })
@@ -191,6 +208,9 @@ const decompositionInputA = ref('')
 const decompositionInputB = ref('')
 const decompositionFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const decompositionAwaitingNext = ref(false)
+const numberWritingInput = ref('')
+const numberWritingFeedback = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const numberWritingAwaitingNext = ref(false)
 
 const wordCountOptions = [1, 2, 3, 4, 5]
 const clockCountOptions = [1, 2, 3, 4, 5]
@@ -220,6 +240,7 @@ const pyramidMaxOptions = [20, 30, 40, 50]
 const comparisonCountOptions = [1, 2, 5, 10, 15, 20]
 const comparisonOperators: ComparisonOperator[] = ['>', '<', '=']
 const decompositionCountOptions = [1, 2, 5, 10, 15, 20]
+const numberWritingCountOptions = [1, 2, 5, 10, 15, 20]
 
 const pyramidIsCurrentQuiz = computed(() => pyramidPhase.value === 'quiz')
 const pyramidIsLastExercise = computed(() => {
@@ -426,6 +447,24 @@ const decompositionNextLabel = computed(() =>
   decompositionIsLastExercise.value ? 'Zobrazit výsledky' : 'Další úloha',
 )
 
+const numberWritingIncorrectCount = computed(() => {
+  if (!numberWritingTotalExercises.value) {
+    return 0
+  }
+  return numberWritingTotalExercises.value - numberWritingCorrectCount.value
+})
+
+const numberWritingIsLastExercise = computed(() => {
+  if (!numberWritingTotalExercises.value) {
+    return true
+  }
+  return numberWritingCurrentStep.value === numberWritingTotalExercises.value
+})
+
+const numberWritingNextLabel = computed(() =>
+  numberWritingIsLastExercise.value ? 'Zobrazit výsledky' : 'Další úloha',
+)
+
 watch(
   () => phase.value,
   (newPhase) => {
@@ -595,6 +634,34 @@ watch(
     decompositionInputB.value = ''
     decompositionFeedback.value = null
     decompositionAwaitingNext.value = false
+  },
+)
+
+watch(
+  () => numberWritingPhase.value,
+  (newPhase) => {
+    if (activeModule.value !== 'numberWriting') {
+      return
+    }
+    if (newPhase === 'quiz') {
+      numberWritingInput.value = ''
+      numberWritingFeedback.value = null
+      numberWritingAwaitingNext.value = false
+    } else if (newPhase === 'summary') {
+      numberWritingAwaitingNext.value = false
+    }
+  },
+)
+
+watch(
+  () => numberWritingCurrentStep.value,
+  () => {
+    if (activeModule.value !== 'numberWriting') {
+      return
+    }
+    numberWritingInput.value = ''
+    numberWritingFeedback.value = null
+    numberWritingAwaitingNext.value = false
   },
 )
 
@@ -959,6 +1026,60 @@ function handleDecompositionNext() {
   decompositionAwaitingNext.value = false
 }
 
+function handleNumberWritingStart() {
+  numberWritingStore.start({ count: numberWritingSetupState.count })
+  numberWritingInput.value = ''
+  numberWritingFeedback.value = null
+  numberWritingAwaitingNext.value = false
+}
+
+function handleNumberWritingInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const sanitized = sanitizeNumeric(input.value).slice(0, 3)
+  input.value = sanitized
+  numberWritingInput.value = sanitized
+}
+
+function handleNumberWritingSubmit() {
+  if (numberWritingAwaitingNext.value || numberWritingPhase.value !== 'quiz') {
+    return
+  }
+  const trimmed = numberWritingInput.value.trim()
+  if (!trimmed) {
+    return
+  }
+  const numeric = Number(trimmed)
+  if (Number.isNaN(numeric)) {
+    return
+  }
+  const result = numberWritingStore.evaluateAnswer(numeric)
+  const exercise = numberWritingCurrentExercise.value
+  if (result.correct) {
+    numberWritingFeedback.value = {
+      type: 'success',
+      text: exercise
+        ? `${exercise.tens} ${formatTensLabel(exercise.tens)} a ${exercise.units} ${formatUnitsLabel(
+            exercise.units,
+          )} = ${exercise.total}`
+        : 'Správně!',
+    }
+    numberWritingAwaitingNext.value = true
+  } else {
+    numberWritingFeedback.value = {
+      type: 'error',
+      text: 'To není správné číslo, zkuste to znovu.',
+    }
+    numberWritingInput.value = ''
+  }
+}
+
+function handleNumberWritingNext() {
+  numberWritingStore.next()
+  numberWritingInput.value = ''
+  numberWritingFeedback.value = null
+  numberWritingAwaitingNext.value = false
+}
+
 function openCzechLanding() {
   wordLabStore.reset()
   syncWordLabSetupFromStore()
@@ -1009,6 +1130,15 @@ function openDecomposition() {
   decompositionFeedback.value = null
   decompositionAwaitingNext.value = false
   activeModule.value = 'decomposition'
+}
+
+function openNumberWriting() {
+  numberWritingStore.reset()
+  Object.assign(numberWritingSetupState, numberWritingStore.settings)
+  numberWritingInput.value = ''
+  numberWritingFeedback.value = null
+  numberWritingAwaitingNext.value = false
+  activeModule.value = 'numberWriting'
 }
 
 function handleDiceStart() {
@@ -1067,6 +1197,24 @@ function formatQuestionLabel(count: number) {
     return 'příklady'
   }
   return 'příkladů'
+}
+
+function formatCzechPlural(value: number, one: string, few: string, many: string) {
+  if (value === 1) {
+    return one
+  }
+  if (value >= 2 && value <= 4) {
+    return few
+  }
+  return many
+}
+
+function formatTensLabel(value: number) {
+  return formatCzechPlural(value, 'desítka', 'desítky', 'desítek')
+}
+
+function formatUnitsLabel(value: number) {
+  return formatCzechPlural(value, 'jednotka', 'jednotky', 'jednotek')
 }
 
 function resetWordAnswer(_problem: WordProblem | null) {
@@ -1277,6 +1425,11 @@ function returnToMathLanding() {
   decompositionInputB.value = ''
   decompositionFeedback.value = null
   decompositionAwaitingNext.value = false
+  numberWritingStore.reset()
+  Object.assign(numberWritingSetupState, numberWritingStore.settings)
+  numberWritingInput.value = ''
+  numberWritingFeedback.value = null
+  numberWritingAwaitingNext.value = false
   activeModule.value = 'math'
 }
 
@@ -1311,6 +1464,11 @@ function returnToHome() {
   decompositionInputB.value = ''
   decompositionFeedback.value = null
   decompositionAwaitingNext.value = false
+  numberWritingStore.reset()
+  Object.assign(numberWritingSetupState, numberWritingStore.settings)
+  numberWritingInput.value = ''
+  numberWritingFeedback.value = null
+  numberWritingAwaitingNext.value = false
   activeModule.value = 'home'
 }
 </script>
@@ -1467,6 +1625,9 @@ function returnToHome() {
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openDecomposition">
           Rozlož čísla
+        </button>
+        <button type="button" class="secondary-action landing-secondary" @click="openNumberWriting">
+          Zapiš čísla
         </button>
         <button type="button" class="secondary-action landing-secondary" @click="openPyramid">
           Sčítací pyramida
@@ -2036,6 +2197,116 @@ function returnToHome() {
           <div class="stat-block error">
             <span class="label">Chybných</span>
             <span class="value">{{ decompositionIncorrectCount }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="summary-actions">
+        <button type="button" class="primary-action" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+        <button type="button" class="secondary-action" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </section>
+  </main>
+  <main v-else-if="activeModule === 'numberWriting'" class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Zapiš čísla</h1>
+        <p>Poskládejte číslo z desítek a jednotek.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="header-button" @click="returnToHome">
+          Zpět na Mozkolaboratoř
+        </button>
+        <button type="button" class="header-button" @click="returnToMathLanding">
+          Jiná matematická úloha
+        </button>
+      </div>
+    </header>
+
+    <section v-if="numberWritingPhase === 'setup'" class="card number-writing-card">
+      <form class="setup-form" @submit.prevent="handleNumberWritingStart">
+        <div class="field-row">
+          <label class="field-label" for="number-writing-count">Počet úloh</label>
+          <select
+            id="number-writing-count"
+            v-model.number="numberWritingSetupState.count"
+            class="select"
+          >
+            <option v-for="count in numberWritingCountOptions" :key="count" :value="count">
+              {{ count }} {{ formatQuestionLabel(count) }}
+            </option>
+          </select>
+        </div>
+        <button type="submit" class="primary-action">Začít zapisovat</button>
+      </form>
+    </section>
+
+    <section v-else-if="numberWritingPhase === 'quiz'" class="card number-writing-card">
+      <div class="session-meta">
+        <span class="phase-badge">Zápis</span>
+        <div class="progress-wrapper">
+          <div class="progress-text">
+            Úloha {{ numberWritingCurrentStep }} z {{ numberWritingTotalExercises }}
+          </div>
+        </div>
+      </div>
+
+      <p class="number-writing-prompt">
+        {{ numberWritingCurrentExercise?.tens ?? 0 }}
+        {{ formatTensLabel(numberWritingCurrentExercise?.tens ?? 0) }}
+        a
+        {{ numberWritingCurrentExercise?.units ?? 0 }}
+        {{ formatUnitsLabel(numberWritingCurrentExercise?.units ?? 0) }}
+      </p>
+
+      <input
+        type="text"
+        inputmode="numeric"
+        maxlength="3"
+        class="number-writing-input"
+        :value="numberWritingInput"
+        :readonly="numberWritingAwaitingNext"
+        @input="handleNumberWritingInput($event)"
+      />
+
+      <p v-if="numberWritingFeedback" :class="['number-writing-feedback', numberWritingFeedback.type]">
+        {{ numberWritingFeedback.text }}
+      </p>
+
+      <div class="number-writing-actions">
+        <button
+          type="button"
+          class="primary-action"
+          :disabled="numberWritingAwaitingNext"
+          @click="handleNumberWritingSubmit"
+        >
+          Zkontrolovat
+        </button>
+        <button
+          type="button"
+          class="primary-action"
+          :disabled="!numberWritingAwaitingNext"
+          @click="handleNumberWritingNext"
+        >
+          {{ numberWritingNextLabel }}
+        </button>
+      </div>
+    </section>
+
+    <section v-else class="card number-writing-card">
+      <div class="comparison-summary">
+        <h2>Vyhodnocení zápisu</h2>
+        <div class="comparison-summary-stats">
+          <div class="stat-block success">
+            <span class="label">Správně</span>
+            <span class="value">{{ numberWritingCorrectCount }}</span>
+          </div>
+          <div class="stat-block error">
+            <span class="label">Chybných</span>
+            <span class="value">{{ numberWritingIncorrectCount }}</span>
           </div>
         </div>
       </div>
@@ -2870,6 +3141,60 @@ function returnToHome() {
 }
 
 .decomposition-feedback.error {
+  color: #b42318;
+}
+
+.number-writing-card {
+  gap: 2rem;
+  align-items: center;
+  text-align: center;
+}
+
+.number-writing-prompt {
+  font-size: clamp(1.5rem, 5.5vw, 2.2rem);
+  font-weight: 600;
+  margin: 0;
+}
+
+.number-writing-input {
+  width: clamp(4rem, 20vw, 6rem);
+  height: clamp(3.6rem, 15vw, 5.2rem);
+  border-radius: 1.3rem;
+  border: 2px solid #d5def5;
+  text-align: center;
+  font-size: clamp(1.8rem, 6vw, 2.5rem);
+  font-weight: 700;
+  background: #f7f8ff;
+}
+
+.number-writing-input:focus {
+  border-color: #3f82ff;
+  box-shadow: 0 0 0 3px rgba(63, 130, 255, 0.2);
+  outline: none;
+}
+
+.number-writing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.number-writing-actions .primary-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.number-writing-feedback {
+  margin: 0;
+  font-weight: 600;
+}
+
+.number-writing-feedback.success {
+  color: #1a7f3c;
+}
+
+.number-writing-feedback.error {
   color: #b42318;
 }
 
