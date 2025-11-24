@@ -237,6 +237,7 @@ const diceThrowOptions: Array<{ value: DiceSettings['throwsCount']; label: strin
 ]
 const pyramidCountOptions = [1, 2, 3, 4, 5]
 const pyramidMaxOptions = [20, 30, 40, 50]
+const limitedMaxOptions = [10, 20, 50, 100]
 const comparisonCountOptions = [1, 2, 5, 10, 15, 20]
 const comparisonOperators: ComparisonOperator[] = ['>', '<', '=']
 const decompositionCountOptions = [1, 2, 5, 10, 15, 20]
@@ -928,7 +929,10 @@ function handlePyramidNext() {
 }
 
 function handleComparisonStart() {
-  comparisonStore.start({ count: comparisonSetupState.count })
+  comparisonStore.start({
+    count: comparisonSetupState.count,
+    max: comparisonSetupState.max,
+  })
   comparisonSelection.value = null
   comparisonFeedback.value = null
   comparisonAwaitingNext.value = false
@@ -968,7 +972,10 @@ function handleComparisonNext() {
 }
 
 function handleDecompositionStart() {
-  decompositionStore.start({ count: decompositionSetupState.count })
+  decompositionStore.start({
+    count: decompositionSetupState.count,
+    max: decompositionSetupState.max,
+  })
   decompositionInputA.value = ''
   decompositionInputB.value = ''
   decompositionFeedback.value = null
@@ -2019,6 +2026,15 @@ function returnToHome() {
             </option>
           </select>
         </div>
+
+        <div class="field-row">
+          <label class="field-label" for="comparison-max">Čísla do</label>
+          <select id="comparison-max" v-model.number="comparisonSetupState.max" class="select">
+            <option v-for="value in limitedMaxOptions" :key="`cmp-max-${value}`" :value="value">
+              {{ value }}
+            </option>
+          </select>
+        </div>
         <button type="submit" class="primary-action">Začít porovnávat</button>
       </form>
     </section>
@@ -2121,6 +2137,18 @@ function returnToHome() {
           >
             <option v-for="count in decompositionCountOptions" :key="count" :value="count">
               {{ count }} {{ formatQuestionLabel(count) }}
+            </option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="decomposition-max">Čísla do</label>
+          <select
+            id="decomposition-max"
+            v-model.number="decompositionSetupState.max"
+            class="select"
+          >
+            <option v-for="value in limitedMaxOptions" :key="`dec-max-${value}`" :value="value">
+              {{ value }}
             </option>
           </select>
         </div>

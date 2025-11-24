@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 export interface DecompositionSettings {
   count: number
+  max: number
 }
 
 interface DecompositionExercise {
@@ -21,22 +22,24 @@ interface DecompositionState {
 
 export const decompositionDefaultSettings: DecompositionSettings = {
   count: 10,
+  max: 50,
 }
 
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function createExercise(): DecompositionExercise {
-  const total = randomInt(1, 100)
+function createExercise(max: number): DecompositionExercise {
+  const clampedMax = Math.max(1, Math.min(100, Math.floor(max)))
+  const total = randomInt(1, clampedMax)
   return {
     id: `${total}-${Math.random().toString(36).slice(2, 7)}`,
     total,
   }
 }
 
-function generateExercises(count: number): DecompositionExercise[] {
-  return Array.from({ length: count }, () => createExercise())
+function generateExercises(count: number, max: number): DecompositionExercise[] {
+  return Array.from({ length: count }, () => createExercise(max))
 }
 
 export const useDecompositionStore = defineStore('decomposition', {
@@ -74,7 +77,7 @@ export const useDecompositionStore = defineStore('decomposition', {
     },
     start(settings: DecompositionSettings) {
       this.settings = { ...settings }
-      this.exercises = generateExercises(this.settings.count)
+      this.exercises = generateExercises(this.settings.count, this.settings.max)
       this.pointer = 0
       this.mistakes = Array.from({ length: this.exercises.length }, () => false)
       this.phase = 'quiz'

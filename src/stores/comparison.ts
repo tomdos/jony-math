@@ -4,6 +4,7 @@ export type ComparisonOperator = '>' | '<' | '='
 
 export interface ComparisonSettings {
   count: number
+  max: number
 }
 
 interface ComparisonExercise {
@@ -25,18 +26,20 @@ interface ComparisonState {
 
 export const comparisonDefaultSettings: ComparisonSettings = {
   count: 10,
+  max: 50,
 }
 
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function createExercise(): ComparisonExercise {
-  let left = randomInt(0, 100)
-  let right = randomInt(0, 100)
+function createExercise(max: number): ComparisonExercise {
+  const clampedMax = Math.max(0, Math.min(100, Math.floor(max)))
+  let left = randomInt(0, clampedMax)
+  let right = randomInt(0, clampedMax)
   // Increase likelihood of equality to make '=' appear occasionally
   if (Math.random() < 0.2) {
-    const equalValue = randomInt(0, 100)
+    const equalValue = randomInt(0, clampedMax)
     left = equalValue
     right = equalValue
   }
@@ -54,8 +57,8 @@ function createExercise(): ComparisonExercise {
   }
 }
 
-function generateExercises(count: number): ComparisonExercise[] {
-  return Array.from({ length: count }, () => createExercise())
+function generateExercises(count: number, max: number): ComparisonExercise[] {
+  return Array.from({ length: count }, () => createExercise(max))
 }
 
 export const useComparisonStore = defineStore('comparison', {
@@ -93,7 +96,7 @@ export const useComparisonStore = defineStore('comparison', {
     },
     start(settings: ComparisonSettings) {
       this.settings = { ...settings }
-      this.exercises = generateExercises(this.settings.count)
+      this.exercises = generateExercises(this.settings.count, this.settings.max)
       this.pointer = 0
       this.mistakes = Array.from({ length: this.exercises.length }, () => false)
       this.phase = 'quiz'
