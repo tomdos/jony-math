@@ -1499,6 +1499,16 @@ function returnToHome() {
         </button>
       </div>
     </section>
+    <div class="below-window">
+      <a
+        class="feedback-link"
+        href="https://docs.google.com/forms/d/e/1FAIpQLScEUCofIR6TYh0zuG04MQIXpQadXa5Tmd2hLWqS1aOdXoTFRA/viewform?usp=header"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Napište nám
+      </a>
+    </div>
   </main>
   <main v-else-if="activeModule === 'dice'" class="app-shell">
     <header class="app-header">
@@ -2612,6 +2622,22 @@ function returnToHome() {
   gap: 1.5rem;
   max-width: 960px;
   margin: 0 auto;
+}
+
+.below-window {
+  text-align: center;
+}
+
+.feedback-link {
+  color: #2f55a4;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.feedback-link:hover,
+.feedback-link:focus-visible {
+  color: #1f2540;
+  outline: none;
 }
 
 .app-header {
